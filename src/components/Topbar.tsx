@@ -6,6 +6,8 @@ interface TopbarProps {
   onNavigate: (section: Section) => void;
   onToggleSidebar: () => void;
   activeSessions: number;
+  onLogout: () => void;
+  token: string;
 }
 
 const SECTION_TITLES: Record<Section, string> = {
@@ -13,22 +15,25 @@ const SECTION_TITLES: Record<Section, string> = {
   logs: "审计日志",
   endpoints: "Endpoints",
   usage: "Usage 用量分析",
+  users: "用户管理",
   login: "登录",
 };
 
-export function Topbar({ activeSection, onNavigate, onToggleSidebar, activeSessions }: TopbarProps) {
+export function Topbar({ activeSection, onNavigate, onToggleSidebar, activeSessions, onLogout, token }: TopbarProps) {
   const [totalRequests, setTotalRequests] = useState("—");
   const [monthlyCost, setMonthlyCost] = useState("—");
 
   useEffect(() => {
-    fetch("/api/usage/stats")
+    fetch("/api/usage/stats", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
       .then((r) => r.json())
       .then((data) => {
         setTotalRequests(data.totalRequests || "0");
         setMonthlyCost(data.estimatedCost || "$0.00");
       })
       .catch(console.error);
-  }, []);
+  }, [token]);
 
   return (
     <div className="topbar">
@@ -54,6 +59,20 @@ export function Topbar({ activeSection, onNavigate, onToggleSidebar, activeSessi
           <span className="val">{monthlyCost}</span>
           <span className="lbl">月成本</span>
         </div>
+        <button
+          onClick={onLogout}
+          style={{
+            padding: "0.5rem 1rem",
+            fontSize: "0.875rem",
+            cursor: "pointer",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-sm)",
+            background: "var(--bg)",
+            color: "var(--fg)",
+          }}
+        >
+          退出
+        </button>
       </div>
     </div>
   );

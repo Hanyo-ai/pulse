@@ -9,6 +9,8 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activeSection, onNavigate, sessionCount, user, open }: SidebarProps) {
+  const isAdmin = user?.role === "admin";
+
   return (
     <aside className={`sidebar${open ? " open" : ""}`} id="sidebar">
       <div className="sidebar-brand">
@@ -41,16 +43,18 @@ export function Sidebar({ activeSection, onNavigate, sessionCount, user, open }:
           审计日志
         </button>
         <div className="nav-section">管理</div>
-        <button
-          className={activeSection === "endpoints" ? "active" : ""}
-          onClick={() => onNavigate("endpoints")}
-        >
-          <svg className="nav-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6">
-            <circle cx="9" cy="9" r="3" />
-            <path d="M9 1v3m0 10v3M1 9h3m10 0h3" />
-          </svg>
-          Endpoints
-        </button>
+        {isAdmin && (
+          <button
+            className={activeSection === "endpoints" ? "active" : ""}
+            onClick={() => onNavigate("endpoints")}
+          >
+            <svg className="nav-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6">
+              <circle cx="9" cy="9" r="3" />
+              <path d="M9 1v3m0 10v3M1 9h3m10 0h3" />
+            </svg>
+            Endpoints
+          </button>
+        )}
         <button
           className={activeSection === "usage" ? "active" : ""}
           onClick={() => onNavigate("usage")}
@@ -61,13 +65,28 @@ export function Sidebar({ activeSection, onNavigate, sessionCount, user, open }:
           </svg>
           Usage
         </button>
+        {isAdmin && (
+          <button
+            className={activeSection === "users" ? "active" : ""}
+            onClick={() => onNavigate("users")}
+          >
+            <svg className="nav-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6">
+              <circle cx="6" cy="5" r="2.5" />
+              <circle cx="12" cy="5" r="2.5" />
+              <path d="M1 15c0-2.5 2-4 5-4s5 1.5 5 4M11 15c0-2.5 2-4 5-4s5 1.5 5 4" />
+            </svg>
+            用户管理
+          </button>
+        )}
       </nav>
       <div className="sidebar-footer">
         <div className="avatar">{user?.display_name?.[0] || "A"}</div>
         <div>
           <strong>{user?.display_name || "Admin"}</strong>
           <br />
-          sylvor-prod
+          <span style={{ fontSize: "0.85em", opacity: 0.7 }}>
+            {isAdmin ? "管理员" : "普通用户"}
+          </span>
         </div>
       </div>
     </aside>

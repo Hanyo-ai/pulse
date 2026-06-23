@@ -51,15 +51,17 @@ function calcCost(ep: EndpointRow, usage: UsageInfo): string {
 
 function logRequest(
   provider: string, model: string, statusCode: number, latencyMs: number,
-  usage: UsageInfo, cost: string, sessionId?: string
+  usage: UsageInfo, cost: string, sessionId?: string, responseBody?: string, requestBody?: string
 ) {
   const db = getDb();
   db.run(
-    "INSERT INTO request_logs (request_id, session_id, provider, model, status_code, latency_ms, tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, cost) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO request_logs (request_id, session_id, provider, model, status_code, latency_ms, tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, cost, response_body, request_body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     [
       crypto.randomUUID(), sessionId || null, provider, model, statusCode, latencyMs,
       usage.inputTokens + usage.outputTokens,
       usage.cacheHitTokens, usage.cacheMissTokens, cost,
+      responseBody || "",
+      requestBody || "",
     ]
   );
 }
@@ -81,12 +83,18 @@ function createSession(provider: string, model: string, messages: BodyMessage[])
   return id;
 }
 
-function finalizeSession(sessionId: string, assistantText: string, tokens: number, latencyMs: number) {
+function finalizeSession(
+  sessionId: string,
+  response: { text: string; thinking?: string; model?: string; stop_reason?: string; usage?: Record<string, number> },
+  totalTokens: number,
+  latencyMs: number
+) {
   const db = getDb();
+  const content = JSON.stringify(response);
   db.run("INSERT INTO messages (session_id, role, content, tokens, latency) VALUES (?, 'assistant', ?, ?, ?)",
-    [sessionId, assistantText, tokens, `${latencyMs}ms`]);
+    [sessionId, content, totalTokens, `${latencyMs}ms`]);
   db.run("UPDATE sessions SET status = 'idle', tokens = ?, latency = ?, updated_at = datetime('now') WHERE id = ?",
-    [tokens, `${latencyMs}ms`, sessionId]);
+    [totalTokens, `${latencyMs}ms`, sessionId]);
 }
 
 async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: number; headers: Record<string, string> }) {
@@ -131,6 +139,8 @@ async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: 
               controller.enqueue(value);
             }
             let usage: UsageInfo = { inputTokens: 0, outputTokens: 0, cacheHitTokens: 0, cacheMissTokens: 0 };
+            let responseModel = "";
+            let stopReason = "";
             for (const line of buffer.split("\n")) {
               if (line.startsWith("data: ") && !line.includes("[DONE]")) {
                 try {
@@ -143,14 +153,22 @@ async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: 
                       cacheMissTokens: j.usage.prompt_cache_miss_tokens || 0,
                     };
                   }
+                  if (j.model && !responseModel) responseModel = j.model;
+                  if (j.choices?.[0]?.finish_reason) stopReason = j.choices[0].finish_reason;
                   const delta = j.choices?.[0]?.delta?.content;
                   if (delta) assistantText += delta;
                 } catch { /* */ }
               }
             }
             const cost = calcCost(ep, usage);
-            logRequest(baseUrl, model, upstream.status, Date.now() - start, usage, cost, sessionId);
-            finalizeSession(sessionId, assistantText, usage.inputTokens + usage.outputTokens, Date.now() - start);
+            const totalTokens = usage.inputTokens + usage.outputTokens;
+            logRequest(ep.provider_name, model, upstream.status, Date.now() - start, usage, cost, sessionId, buffer, JSON.stringify(body));
+            finalizeSession(sessionId, {
+              text: assistantText,
+              model: responseModel || (model as string),
+              stop_reason: stopReason,
+              usage: { input_tokens: usage.inputTokens, output_tokens: usage.outputTokens, cache_read_input_tokens: usage.cacheHitTokens, cache_creation_input_tokens: usage.cacheMissTokens },
+            }, totalTokens, Date.now() - start);
           } finally {
             reader.releaseLock();
             controller.close();
@@ -165,6 +183,8 @@ async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: 
 
     let usage: UsageInfo = { inputTokens: 0, outputTokens: 0, cacheHitTokens: 0, cacheMissTokens: 0 };
     let assistantText = "";
+    let responseModel = "";
+    let stopReason = "";
     try {
       const j = JSON.parse(text);
       usage = {
@@ -174,11 +194,19 @@ async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: 
         cacheMissTokens: j.usage?.prompt_cache_miss_tokens || 0,
       };
       assistantText = j.choices?.[0]?.message?.content || text;
+      responseModel = j.model || "";
+      stopReason = j.choices?.[0]?.finish_reason || "";
     } catch { /* */ }
 
     const cost = calcCost(ep, usage);
-    logRequest(baseUrl, model, upstream.status, latencyMs, usage, cost, sessionId);
-    finalizeSession(sessionId, assistantText, usage.inputTokens + usage.outputTokens, latencyMs);
+    const totalTokens = usage.inputTokens + usage.outputTokens;
+    logRequest(ep.provider_name, model, upstream.status, latencyMs, usage, cost, sessionId, text, JSON.stringify(body));
+    finalizeSession(sessionId, {
+      text: assistantText,
+      model: responseModel || (model as string),
+      stop_reason: stopReason,
+      usage: { input_tokens: usage.inputTokens, output_tokens: usage.outputTokens, cache_read_input_tokens: usage.cacheHitTokens, cache_creation_input_tokens: usage.cacheMissTokens },
+    }, totalTokens, latencyMs);
 
     set.status = upstream.status;
     set.headers["Content-Type"] = "application/json";
@@ -235,6 +263,9 @@ async function proxyAnthropic(gatewayKey: string, request: Request, set: { statu
               controller.enqueue(value);
             }
             let usage: UsageInfo = { inputTokens: 0, outputTokens: 0, cacheHitTokens: 0, cacheMissTokens: 0 };
+            let thinkingText = "";
+            let responseModel = "";
+            let stopReason = "";
             for (const line of buffer.split("\n")) {
               if (line.startsWith("data: ")) {
                 try {
@@ -247,15 +278,31 @@ async function proxyAnthropic(gatewayKey: string, request: Request, set: { statu
                       cacheMissTokens: j.usage.prompt_cache_miss_tokens || 0,
                     };
                   }
+                  if (j.type === "message_start" && j.message?.model && !responseModel) {
+                    responseModel = j.message.model;
+                  }
+                  if (j.type === "message_delta" && j.delta?.stop_reason) {
+                    stopReason = j.delta.stop_reason;
+                  }
                   if (j.type === "content_block_delta" && j.delta?.text) {
                     assistantText += j.delta.text;
+                  }
+                  if (j.type === "content_block_delta" && j.delta?.thinking) {
+                    thinkingText += j.delta.thinking;
                   }
                 } catch { /* */ }
               }
             }
             const cost = calcCost(ep, usage);
-            logRequest(baseUrl, model, upstream.status, Date.now() - start, usage, cost, sessionId);
-            finalizeSession(sessionId, assistantText, usage.inputTokens + usage.outputTokens, Date.now() - start);
+            const totalTokens = usage.inputTokens + usage.outputTokens;
+            logRequest(ep.provider_name, model, upstream.status, Date.now() - start, usage, cost, sessionId, buffer, JSON.stringify(body));
+            finalizeSession(sessionId, {
+              text: assistantText,
+              thinking: thinkingText || undefined,
+              model: responseModel || (model as string),
+              stop_reason: stopReason,
+              usage: { input_tokens: usage.inputTokens, output_tokens: usage.outputTokens, cache_read_input_tokens: usage.cacheHitTokens, cache_creation_input_tokens: usage.cacheMissTokens },
+            }, totalTokens, Date.now() - start);
           } finally {
             reader.releaseLock();
             controller.close();
@@ -270,6 +317,9 @@ async function proxyAnthropic(gatewayKey: string, request: Request, set: { statu
 
     let usage: UsageInfo = { inputTokens: 0, outputTokens: 0, cacheHitTokens: 0, cacheMissTokens: 0 };
     let assistantText = "";
+    let thinkingText = "";
+    let responseModel = "";
+    let stopReason = "";
     try {
       const j = JSON.parse(text);
       usage = {
@@ -278,12 +328,29 @@ async function proxyAnthropic(gatewayKey: string, request: Request, set: { statu
         cacheHitTokens: j.usage?.prompt_cache_hit_tokens || 0,
         cacheMissTokens: j.usage?.prompt_cache_miss_tokens || 0,
       };
-      assistantText = j.content?.[0]?.text || text;
+      // Anthropic content is an array of blocks: [{type:"text",text:"..."}, {type:"thinking",thinking:"..."}]
+      const blocks = j.content as Array<{ type: string; text?: string; thinking?: string }> | undefined;
+      if (blocks) {
+        for (const b of blocks) {
+          if (b.type === "text" && b.text) assistantText += b.text;
+          if (b.type === "thinking" && b.thinking) thinkingText += b.thinking;
+        }
+      }
+      if (!assistantText) assistantText = text;
+      responseModel = j.model || "";
+      stopReason = j.stop_reason || "";
     } catch { /* */ }
 
     const cost = calcCost(ep, usage);
-    logRequest(baseUrl, model, upstream.status, latencyMs, usage, cost, sessionId);
-    finalizeSession(sessionId, assistantText, usage.inputTokens + usage.outputTokens, latencyMs);
+    const totalTokens = usage.inputTokens + usage.outputTokens;
+    logRequest(ep.provider_name, model, upstream.status, latencyMs, usage, cost, sessionId, text, JSON.stringify(body));
+    finalizeSession(sessionId, {
+      text: assistantText,
+      thinking: thinkingText || undefined,
+      model: responseModel || (model as string),
+      stop_reason: stopReason,
+      usage: { input_tokens: usage.inputTokens, output_tokens: usage.outputTokens, cache_read_input_tokens: usage.cacheHitTokens, cache_creation_input_tokens: usage.cacheMissTokens },
+    }, totalTokens, latencyMs);
 
     set.status = upstream.status;
     set.headers["Content-Type"] = "application/json";

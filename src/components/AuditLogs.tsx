@@ -1,18 +1,36 @@
 import { useState, useEffect } from "react";
 import type { RequestLog } from "../types";
 
-export function AuditLogs() {
+interface AuditLogsProps {
+  token: string;
+}
+
+function formatJson(raw: string): string {
+  if (!raw) return "(空响应)";
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
+}
+
+export function AuditLogs({ token }: AuditLogsProps) {
   const [logs, setLogs] = useState<RequestLog[]>([]);
   const [search, setSearch] = useState("");
   const [provider, setProvider] = useState("全部供应商");
   const [status, setStatus] = useState("全部状态");
+  const [selectedLog, setSelectedLog] = useState<RequestLog | null>(null);
 
   useEffect(() => {
-    fetch("/api/logs")
+    fetch("/api/logs", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
       .then((r) => r.json())
-      .then(setLogs)
+      .then((data) => {
+        if (Array.isArray(data)) setLogs(data);
+      })
       .catch(console.error);
-  }, []);
+  }, [token]);
 
   const filtered = logs.filter((l) => {
     if (provider !== "全部供应商" && l.provider !== provider) return false;
@@ -68,7 +86,13 @@ export function AuditLogs() {
           </thead>
           <tbody>
             {filtered.map((l) => (
-              <tr key={l.id}>
+              <tr
+                key={l.id}
+                className="log-row"
+                style={{ cursor: (l.response_body || l.request_body) ? "pointer" : "default" }}
+                onClick={() => (l.response_body || l.request_body) && setSelectedLog(l)}
+                title={l.response_body || l.request_body ? "点击查看请求/响应" : ""}
+              >
                 <td className="mono">
                   {new Date(l.created_at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                 </td>
@@ -87,6 +111,53 @@ export function AuditLogs() {
           </tbody>
         </table>
       </div>
+
+      {selectedLog && (
+        <div
+          className="log-modal-overlay"
+          onClick={() => setSelectedLog(null)}
+        >
+          <div className="log-modal card" onClick={(e) => e.stopPropagation()}>
+            <div className="log-modal-header">
+              <div>
+                <h3>请求详情</h3>
+                <div className="log-modal-meta">
+                  <span className="mono">{selectedLog.request_id}</span>
+                  <span>·</span>
+                  <span>{selectedLog.provider}</span>
+                  <span>·</span>
+                  <span>{selectedLog.model}</span>
+                  <span>·</span>
+                  <span className={`cell-status ${statusClass(selectedLog.status_code)}`}>{selectedLog.status_code}</span>
+                </div>
+              </div>
+              <button
+                className="log-modal-close"
+                onClick={() => setSelectedLog(null)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="log-modal-sections">
+              {selectedLog.request_body && (
+                <div className="log-modal-section">
+                  <div className="log-modal-section-label">Request</div>
+                  <pre className="log-modal-body"><code>{formatJson(selectedLog.request_body)}</code></pre>
+                </div>
+              )}
+              {selectedLog.response_body && (
+                <div className="log-modal-section">
+                  <div className="log-modal-section-label">Response</div>
+                  <pre className="log-modal-body"><code>{formatJson(selectedLog.response_body)}</code></pre>
+                </div>
+              )}
+              {!selectedLog.request_body && !selectedLog.response_body && (
+                <div style={{ textAlign: "center", color: "var(--muted)", padding: "24px" }}>无请求/响应数据</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

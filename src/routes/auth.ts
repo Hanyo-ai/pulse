@@ -1,11 +1,26 @@
-import { Elysia, t } from "elysia";
+import { Elysia } from "elysia";
 import { getDb } from "../db";
+import { requireAuth, requireAdmin } from "../middleware/auth";
+import type { UserRole } from "../types";
 
-interface User {
-  id: number;
-  username: string;
-  display_name: string;
-  role: string;
+const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+function generateToken(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Buffer.from(bytes).toString("base64url");
+}
+
+function createAuthSession(userId: number): string {
+  const db = getDb();
+  const token = generateToken();
+  const sessionId = crypto.randomUUID();
+  const expiresAt = Date.now() + TOKEN_TTL_MS;
+  db.run(
+    "INSERT INTO auth_sessions (id, user_id, token, expires_at) VALUES (?, ?, ?, ?)",
+    [sessionId, userId, token, expiresAt]
+  );
+  return token;
 }
 
 export const authRoutes = new Elysia({ prefix: "/api/auth" })
@@ -13,17 +28,25 @@ export const authRoutes = new Elysia({ prefix: "/api/auth" })
     const db = getDb();
     const { username, password } = body as { username: string; password: string };
 
-    const user = db.query("SELECT * FROM users WHERE username = ?").get(username) as Record<string, unknown> | null;
+    const user = db
+      .query("SELECT * FROM users WHERE username = ?")
+      .get(username) as Record<string, unknown> | null;
     if (!user) {
-      return new Response(JSON.stringify({ error: "用户名或密码错误" }), { status: 401 });
+      return new Response(JSON.stringify({ error: "用户名或密码错误" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
-    const valid = Bun.password.verifySync(password, user.password_hash as string);
+    const valid = await Bun.password.verify(password, user.password_hash as string);
     if (!valid) {
-      return new Response(JSON.stringify({ error: "用户名或密码错误" }), { status: 401 });
+      return new Response(JSON.stringify({ error: "用户名或密码错误" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
-    const token = await Bun.password.hash(`${user.username}:${Date.now()}`, "bcrypt");
+    const token = createAuthSession(user.id as number);
     return {
       token,
       user: {
@@ -31,34 +54,178 @@ export const authRoutes = new Elysia({ prefix: "/api/auth" })
         username: user.username,
         display_name: user.display_name,
         role: user.role,
-      } as User,
+      },
     };
   })
-  .post("/register", async ({ body }) => {
+  .post("/logout", ({ headers }) => {
+    const auth = headers["authorization"];
+    if (auth) {
+      const [, token] = auth.split(" ");
+      if (token) {
+        const db = getDb();
+        db.run("DELETE FROM auth_sessions WHERE token = ?", [token]);
+      }
+    }
+    return { success: true };
+  })
+  .get("/me", ({ headers }) => {
+    const result = requireAuth(headers["authorization"] ?? null);
+    if (result instanceof Response) return result;
+    return result.user;
+  })
+  // Admin-only: list users
+  .get("/users", ({ headers }) => {
+    const result = requireAdmin(headers["authorization"] ?? null);
+    if (result instanceof Response) return result;
     const db = getDb();
-    const { username, password, display_name } = body as { username: string; password: string; display_name?: string };
+    return db
+      .query("SELECT id, username, display_name, role, created_at FROM users ORDER BY id ASC")
+      .all();
+  })
+  // Admin-only: create user
+  .post("/users", async ({ body, headers }) => {
+    const result = requireAdmin(headers["authorization"] ?? null);
+    if (result instanceof Response) return result;
+
+    const db = getDb();
+    const { username, password, display_name, role = "user" } = body as {
+      username: string;
+      password: string;
+      display_name?: string;
+      role?: string;
+    };
+
+    if (!username || username.length < 3 || username.length > 50 || !/^[\w-]+$/.test(username)) {
+      return new Response(
+        JSON.stringify({ error: "用户名需为3-50位字母、数字、下划线或连字符" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    if (!password || password.length < 8) {
+      return new Response(JSON.stringify({ error: "密码至少8位" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (role !== "admin" && role !== "user") {
+      return new Response(JSON.stringify({ error: "角色无效" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
 
     const existing = db.query("SELECT id FROM users WHERE username = ?").get(username);
     if (existing) {
-      return new Response(JSON.stringify({ error: "用户名已存在" }), { status: 409 });
+      return new Response(JSON.stringify({ error: "用户名已存在" }), {
+        status: 409,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
-    const passwordHash = Bun.password.hashSync(password, "bcrypt");
-    db.run("INSERT INTO users (username, password_hash, display_name) VALUES (?, ?, ?)",
-      [username, passwordHash, display_name || username]);
+    const passwordHash = await Bun.password.hash(password, "bcrypt");
+    db.run(
+      "INSERT INTO users (username, password_hash, display_name, role) VALUES (?, ?, ?, ?)",
+      [username, passwordHash, display_name || username, role]
+    );
 
-    return { success: true, message: "注册成功" };
+    const newUser = db
+      .query("SELECT id, username, display_name, role, created_at FROM users WHERE username = ?")
+      .get(username);
+    return newUser;
   })
-  .get("/users", () => {
-    const db = getDb();
-    return db.query("SELECT id, username, display_name, role, created_at FROM users ORDER BY id ASC").all();
-  })
-  .get("/me", ({ headers }) => {
-    // Simple token-based auth check
-    const auth = headers["authorization"];
-    if (!auth) return new Response(JSON.stringify({ error: "未登录" }), { status: 401 });
+  // Admin-only: update user
+  .put("/users/:id", async ({ params, body, headers }) => {
+    const result = requireAdmin(headers["authorization"] ?? null);
+    if (result instanceof Response) return result;
 
     const db = getDb();
-    const user = db.query("SELECT id, username, display_name, role FROM users LIMIT 1").get() as User;
-    return user;
+    const userId = parseInt(params.id);
+    const { display_name, role, password } = body as {
+      display_name?: string;
+      role?: string;
+      password?: string;
+    };
+
+    const user = db.query("SELECT id, username FROM users WHERE id = ?").get(userId) as {
+      id: number;
+      username: string;
+    } | null;
+    if (!user) {
+      return new Response(JSON.stringify({ error: "用户不存在" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    // Prevent demoting yourself
+    if (role && role !== "admin" && userId === result.user.id) {
+      return new Response(JSON.stringify({ error: "不能修改自己的权限" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (role && role !== "admin" && role !== "user") {
+      return new Response(JSON.stringify({ error: "角色无效" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (display_name !== undefined) {
+      db.run("UPDATE users SET display_name = ?, updated_at = datetime('now') WHERE id = ?", [
+        display_name,
+        userId,
+      ]);
+    }
+    if (role !== undefined) {
+      db.run("UPDATE users SET role = ?, updated_at = datetime('now') WHERE id = ?", [
+        role as UserRole,
+        userId,
+      ]);
+    }
+    if (password) {
+      if (password.length < 8) {
+        return new Response(JSON.stringify({ error: "密码至少8位" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      const passwordHash = await Bun.password.hash(password, "bcrypt");
+      db.run("UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?", [
+        passwordHash,
+        userId,
+      ]);
+      // Invalidate all sessions for this user
+      db.run("DELETE FROM auth_sessions WHERE user_id = ?", [userId]);
+    }
+
+    return db
+      .query("SELECT id, username, display_name, role, created_at FROM users WHERE id = ?")
+      .get(userId);
+  })
+  // Admin-only: delete user
+  .delete("/users/:id", ({ params, headers }) => {
+    const result = requireAdmin(headers["authorization"] ?? null);
+    if (result instanceof Response) return result;
+
+    const userId = parseInt(params.id);
+    if (userId === result.user.id) {
+      return new Response(JSON.stringify({ error: "不能删除自己的账号" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const db = getDb();
+    const user = db.query("SELECT id FROM users WHERE id = ?").get(userId);
+    if (!user) {
+      return new Response(JSON.stringify({ error: "用户不存在" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    db.run("DELETE FROM users WHERE id = ?", [userId]);
+    return { success: true };
   });

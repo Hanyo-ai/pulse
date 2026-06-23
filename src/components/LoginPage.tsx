@@ -2,46 +2,36 @@ import { useState } from "react";
 import type { User } from "../types";
 
 interface LoginPageProps {
-  onLogin: (user: User) => void;
+  onLogin: (user: User, token: string) => void;
 }
 
 export function LoginPage({ onLogin }: LoginPageProps) {
-  const [isRegister, setIsRegister] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
-    const endpoint = isRegister ? "/api/auth/register" : "/api/auth/login";
-    const body = isRegister
-      ? { username, password, display_name: displayName }
-      : { username, password };
-
-    const res = await fetch(endpoint, {
+    const res = await fetch("/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ username, password }),
     });
 
     const data = await res.json();
 
     if (!res.ok) {
-      setError(data.error || "操作失败");
+      setError(data.error || "登录失败");
       return;
     }
 
-    if (isRegister) {
-      setIsRegister(false);
-      setError("");
-      setPassword("");
-      return;
-    }
+    // Store token and user in localStorage
+    localStorage.setItem("auth_token", data.token);
+    localStorage.setItem("user", JSON.stringify(data.user));
 
-    onLogin(data.user);
+    onLogin(data.user, data.token);
   };
 
   return (
@@ -56,7 +46,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
           </div>
           <h2 style={{ fontSize: "20px", fontWeight: 650 }}>SYLVOR AI Gateway</h2>
           <p style={{ color: "var(--muted)", fontSize: "13px", marginTop: "4px" }}>
-            {isRegister ? "创建新账户" : "登录管理面板"}
+            登录管理面板
           </p>
         </div>
 
@@ -76,6 +66,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
+              autoFocus
               style={{
                 width: "100%",
                 padding: "8px 12px",
@@ -88,29 +79,6 @@ export function LoginPage({ onLogin }: LoginPageProps) {
               }}
             />
           </div>
-
-          {isRegister && (
-            <div>
-              <label style={{ fontSize: "12px", fontWeight: 600, color: "var(--muted)", display: "block", marginBottom: "4px" }}>
-                显示名称
-              </label>
-              <input
-                type="text"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "8px 12px",
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--radius-sm)",
-                  font: "13px var(--font)",
-                  background: "var(--bg)",
-                  color: "var(--fg)",
-                  outline: "none",
-                }}
-              />
-            </div>
-          )}
 
           <div>
             <label style={{ fontSize: "12px", fontWeight: 600, color: "var(--muted)", display: "block", marginBottom: "4px" }}>
@@ -135,19 +103,12 @@ export function LoginPage({ onLogin }: LoginPageProps) {
           </div>
 
           <button type="submit" className="btn btn-primary" style={{ width: "100%", justifyContent: "center", padding: "10px" }}>
-            {isRegister ? "注册" : "登录"}
+            登录
           </button>
         </form>
 
         <p style={{ textAlign: "center", marginTop: "16px", fontSize: "13px", color: "var(--muted)" }}>
-          {isRegister ? "已有账户？" : "没有账户？"}{" "}
-          <button
-            type="button"
-            onClick={() => { setIsRegister(!isRegister); setError(""); }}
-            style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", font: "inherit" }}
-          >
-            {isRegister ? "去登录" : "去注册"}
-          </button>
+          需要注册？请联系管理员
         </p>
       </div>
     </section>

@@ -30,6 +30,17 @@ function initSchema(db: Database) {
   `);
 
   db.run(`
+    CREATE TABLE IF NOT EXISTS auth_sessions (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      token TEXT UNIQUE NOT NULL,
+      expires_at INTEGER NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
+  db.run(`
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
@@ -91,6 +102,16 @@ function initSchema(db: Database) {
       updated_at TEXT DEFAULT (datetime('now'))
     )
   `);
+
+  // Migration: add response_body to request_logs
+  try {
+    db.run("ALTER TABLE request_logs ADD COLUMN response_body TEXT DEFAULT ''");
+  } catch { /* column already exists */ }
+
+  // Migration: add request_body to request_logs
+  try {
+    db.run("ALTER TABLE request_logs ADD COLUMN request_body TEXT DEFAULT ''");
+  } catch { /* column already exists */ }
 
   // Migration: add new columns if they don't exist
   const newColumns = [

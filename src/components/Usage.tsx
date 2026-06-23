@@ -96,32 +96,43 @@ function renderChart(trend: TrendPoint[]) {
   );
 }
 
-export function Usage() {
+interface UsageProps {
+  token: string;
+}
+
+export function Usage({ token }: UsageProps) {
   const [stats, setStats] = useState<UsageStats>({
     totalTokens: "—",
     totalRequests: "—",
     avgLatency: "—",
     estimatedCost: "—",
+    cacheHitRate: "—",
   });
   const [breakdown, setBreakdown] = useState<ModelBreakdown[]>([]);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
 
   useEffect(() => {
-    fetch("/api/usage/stats")
+    const headers = { Authorization: `Bearer ${token}` };
+
+    fetch("/api/usage/stats", { headers })
       .then((r) => r.json())
       .then(setStats)
       .catch(console.error);
 
-    fetch("/api/usage/by-model")
+    fetch("/api/usage/by-model", { headers })
       .then((r) => r.json())
-      .then(setBreakdown)
+      .then((data) => {
+        if (Array.isArray(data)) setBreakdown(data);
+      })
       .catch(console.error);
 
-    fetch("/api/usage/trend")
+    fetch("/api/usage/trend", { headers })
       .then((r) => r.json())
-      .then(setTrend)
+      .then((data) => {
+        if (Array.isArray(data)) setTrend(data);
+      })
       .catch(console.error);
-  }, []);
+  }, [token]);
 
   return (
     <section className="section active" style={{ overflowY: "auto", padding: "24px" }}>
@@ -145,7 +156,7 @@ export function Usage() {
         </select>
       </div>
 
-      <div className="grid-4" style={{ marginBottom: "18px" }}>
+      <div className="grid-5" style={{ marginBottom: "18px" }}>
         <div className="stat-card">
           <div className="stat-label">总 Token 用量</div>
           <div className="stat-value">{stats.totalTokens}</div>
@@ -163,6 +174,13 @@ export function Usage() {
           <div className="stat-value">{stats.avgLatency}</div>
           <div className="stat-sub" style={{ color: "var(--green)" }}>
             &nbsp;
+          </div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">缓存命中率</div>
+          <div className="stat-value">{stats.cacheHitRate}</div>
+          <div className="stat-sub" style={{ color: "var(--green)" }}>
+            prompt cache
           </div>
         </div>
         <div className="stat-card">

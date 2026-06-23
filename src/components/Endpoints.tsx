@@ -4,6 +4,7 @@ import type { Endpoint } from "../types";
 interface AddModalProps {
   onClose: () => void;
   onCreated: () => void;
+  token: string;
 }
 
 const inputStyle: React.CSSProperties = {
@@ -26,7 +27,7 @@ const labelStyle: React.CSSProperties = {
   marginBottom: "4px",
 };
 
-function AddModal({ onClose, onCreated }: AddModalProps) {
+function AddModal({ onClose, onCreated, token }: AddModalProps) {
   const [displayName, setDisplayName] = useState("");
   const [providerName, setProviderName] = useState("");
   const [providerKey, setProviderKey] = useState("");
@@ -58,7 +59,10 @@ function AddModal({ onClose, onCreated }: AddModalProps) {
     try {
       const res = await fetch("/api/endpoints/test", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           base_url: endpointUrl,
           api_key: apiKey,
@@ -88,7 +92,10 @@ function AddModal({ onClose, onCreated }: AddModalProps) {
     try {
       const res = await fetch("/api/endpoints", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           display_name: displayName,
           provider_name: providerName,
@@ -530,15 +537,19 @@ function TestPanel({ ep }: { ep: Endpoint }) {
   );
 }
 
-export function Endpoints() {
+export function Endpoints({ token }: { token: string }) {
   const [endpoints, setEndpoints] = useState<Endpoint[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
   const fetchEndpoints = () => {
-    fetch("/api/endpoints")
+    fetch("/api/endpoints", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
       .then((r) => r.json())
-      .then(setEndpoints)
+      .then((data) => {
+        if (Array.isArray(data)) setEndpoints(data);
+      })
       .catch(console.error);
   };
 
@@ -550,7 +561,10 @@ export function Endpoints() {
     const newEnabled = ep.enabled ? 0 : 1;
     await fetch(`/api/endpoints/${ep.id}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
       body: JSON.stringify({ enabled: newEnabled }),
     });
     fetchEndpoints();
@@ -674,7 +688,7 @@ export function Endpoints() {
       </div>
 
       {showModal && (
-        <AddModal onClose={() => setShowModal(false)} onCreated={fetchEndpoints} />
+        <AddModal onClose={() => setShowModal(false)} onCreated={fetchEndpoints} token={token} />
       )}
     </section>
   );

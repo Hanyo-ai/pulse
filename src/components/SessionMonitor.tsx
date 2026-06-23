@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import type { Session, Message } from "../types";
+import type { Session, Message, AssistantResponse } from "../types";
 
 // ====================== SessionBar ======================
 interface SessionBarProps {
@@ -113,6 +113,49 @@ interface ChatPanelProps {
   session: Session | null;
 }
 
+function parseContent(content: string): AssistantResponse | null {
+  try {
+    const parsed = JSON.parse(content);
+    if (parsed && typeof parsed.text === "string") return parsed as AssistantResponse;
+  } catch { /* not JSON, plain text */ }
+  return null;
+}
+
+function ThinkingBlock({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="msg-thinking">
+      <button className="msg-thinking-header" onClick={() => setOpen(!open)}>
+        <span className="msg-thinking-arrow">{open ? "▾" : "▸"}</span>
+        <span>思考过程</span>
+      </button>
+      {open && <div className="msg-thinking-content">{text}</div>}
+    </div>
+  );
+}
+
+function UsageFooter({ usage, model, stopReason }: { usage?: AssistantResponse["usage"]; model?: string; stopReason?: string }) {
+  if (!usage && !model && !stopReason) return null;
+  return (
+    <div className="msg-footer">
+      {model && <span className="msg-footer-item msg-model-badge">{model}</span>}
+      {usage && (
+        <>
+          <span className="msg-footer-item">输入 {usage.input_tokens.toLocaleString()}</span>
+          <span className="msg-footer-item">输出 {usage.output_tokens.toLocaleString()}</span>
+          {(usage.cache_read_input_tokens ?? 0) > 0 && (
+            <span className="msg-footer-item msg-cache-hit">缓存命中 {usage.cache_read_input_tokens!.toLocaleString()}</span>
+          )}
+          {(usage.cache_creation_input_tokens ?? 0) > 0 && (
+            <span className="msg-footer-item msg-cache-miss">缓存写入 {usage.cache_creation_input_tokens!.toLocaleString()}</span>
+          )}
+        </>
+      )}
+      {stopReason && <span className="msg-footer-item msg-stop-reason">{stopReason}</span>}
+    </div>
+  );
+}
+
 function ChatPanel({ messages, session }: ChatPanelProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -146,6 +189,7 @@ function ChatPanel({ messages, session }: ChatPanelProps) {
           const isAssistant = msg.role === "assistant";
           const hasData = isAssistant && msg.tokens > 0;
           const isBlocked = isAssistant && msg.tokens === 0;
+          const structured = isAssistant ? parseContent(msg.content) : null;
 
           return (
             <div key={msg.id} className={`msg-row ${msg.role}`}>
@@ -155,12 +199,26 @@ function ChatPanel({ messages, session }: ChatPanelProps) {
                 {msg.role === "user" ? "U" : msg.role === "assistant" ? providerAbbr : "SYS"}
               </div>
               <div>
-                <div className="msg-bubble">{msg.content}</div>
-                {hasData && (
-                  <div className="msg-meta">
-                    <span className="msg-tokens">{msg.tokens} tokens</span>
-                    <span className="msg-latency">{msg.latency}</span>
-                  </div>
+                {structured ? (
+                  <>
+                    {structured.thinking && <ThinkingBlock text={structured.thinking} />}
+                    <div className="msg-bubble">{structured.text}</div>
+                    <UsageFooter usage={structured.usage} model={structured.model} stopReason={structured.stop_reason} />
+                    <div className="msg-meta">
+                      <span className="msg-tokens">{msg.tokens} tokens</span>
+                      <span className="msg-latency">{msg.latency}</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="msg-bubble">{msg.content}</div>
+                    {hasData && (
+                      <div className="msg-meta">
+                        <span className="msg-tokens">{msg.tokens} tokens</span>
+                        <span className="msg-latency">{msg.latency}</span>
+                      </div>
+                    )}
+                  </>
                 )}
                 {isBlocked && (
                   <div className="msg-meta">
@@ -195,9 +253,10 @@ interface SessionMonitorProps {
   activeSessionId: string;
   onSelectSession: (id: string) => void;
   messages: Message[];
+  token: string;
 }
 
-export function SessionMonitor({ sessions, activeSessionId, onSelectSession, messages }: SessionMonitorProps) {
+export function SessionMonitor({ sessions, activeSessionId, onSelectSession, messages, token }: SessionMonitorProps) {
   const activeSession = sessions.find((s) => s.id === activeSessionId) || null;
 
   return (

@@ -22,6 +22,21 @@ export interface Message {
   created_at?: string;
 }
 
+/** Parsed structured assistant response stored as JSON in Message.content */
+export interface AssistantResponse {
+  text: string;
+  thinking?: string;
+  model?: string;
+  stop_reason?: string;
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
+    service_tier?: string;
+  };
+}
+
 export interface RequestLog {
   id: number;
   request_id: string;
@@ -31,7 +46,11 @@ export interface RequestLog {
   status_code: number;
   latency_ms: number;
   tokens: number;
+  prompt_cache_hit_tokens: number;
+  prompt_cache_miss_tokens: number;
   cost: string;
+  response_body: string;
+  request_body: string;
   created_at: string;
 }
 
@@ -68,13 +87,31 @@ export interface UsageStats {
   totalRequests: string;
   avgLatency: string;
   estimatedCost: string;
+  cacheHitRate: string;
 }
+
+export type UserRole = "admin" | "user";
 
 export interface User {
   id: number;
   username: string;
-  display_name: string;
-  role: string;
+  display_name: string | null;
+  role: UserRole;
+  created_at?: string;
+  updated_at?: string;
 }
 
-export type Section = "session-monitor" | "logs" | "endpoints" | "usage" | "login";
+export interface AuthSession {
+  id: string;
+  user_id: number;
+  token: string;
+  expires_at: number;
+  created_at: string;
+}
+
+export interface AuthContext {
+  user: User;
+  token: string;
+}
+
+export type Section = "session-monitor" | "logs" | "endpoints" | "usage" | "users" | "login";

@@ -1,53 +1,78 @@
-import { Elysia, t } from "elysia";
+import { Elysia } from "elysia";
 import { getDb } from "../db";
-
-interface Session {
-  id: string;
-  title: string;
-  provider: string;
-  model: string;
-  status: string;
-  tokens: number;
-  latency: string;
-  cost: string;
-  created_at: string;
-}
-
-interface Message {
-  id: number;
-  session_id: string;
-  role: string;
-  content: string;
-  tokens: number;
-  latency: string;
-  created_at: string;
-}
+import { requireAuth } from "../middleware/auth";
 
 export const sessionsRoutes = new Elysia({ prefix: "/api/sessions" })
-  .get("/", () => {
+  .get("/", ({ headers }) => {
+    const result = requireAuth(headers["authorization"] ?? null);
+    if (result instanceof Response) return result;
+
     const db = getDb();
-    return db.query("SELECT * FROM sessions ORDER BY updated_at DESC").all() as Session[];
+    if (result.user.role === "admin") {
+      return db.query("SELECT * FROM sessions ORDER BY updated_at DESC").all();
+    }
+    return db
+      .query("SELECT * FROM sessions WHERE user_id = ? ORDER BY updated_at DESC")
+      .all(result.user.id);
   })
-  .get("/:id", ({ params: { id } }) => {
+  .get("/:id", ({ params: { id }, headers }) => {
+    const result = requireAuth(headers["authorization"] ?? null);
+    if (result instanceof Response) return result;
+
     const db = getDb();
-    const session = db.query("SELECT * FROM sessions WHERE id = ?").get(id) as Session | null;
-    if (!session) return new Response("Not found", { status: 404 });
-    const messages = db.query("SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC").all(id) as Message[];
+    const session = db.query("SELECT * FROM sessions WHERE id = ?").get(id) as Record<string, unknown> | null;
+    if (!session) return new Response(JSON.stringify({ error: "Not found" }), { status: 404 });
+
+    if (result.user.role !== "admin" && session.user_id !== result.user.id) {
+      return new Response(JSON.stringify({ error: "Access denied" }), { status: 403 });
+    }
+
+    const messages = db
+      .query("SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC")
+      .all(id);
     return { ...session, messages };
   })
-  .get("/:id/messages", ({ params: { id } }) => {
+  .get("/:id/messages", ({ params: { id }, headers }) => {
+    const result = requireAuth(headers["authorization"] ?? null);
+    if (result instanceof Response) return result;
+
     const db = getDb();
-    return db.query("SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC").all(id) as Message[];
+    const session = db.query("SELECT user_id FROM sessions WHERE id = ?").get(id) as { user_id: number } | null;
+    if (!session) return new Response(JSON.stringify({ error: "Not found" }), { status: 404 });
+
+    if (result.user.role !== "admin" && session.user_id !== result.user.id) {
+      return new Response(JSON.stringify({ error: "Access denied" }), { status: 403 });
+    }
+
+    return db
+      .query("SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC")
+      .all(id);
   })
-  .post("/", ({ body }) => {
+  .post("/", ({ body, headers }) => {
+    const result = requireAuth(headers["authorization"] ?? null);
+    if (result instanceof Response) return result;
+
     const db = getDb();
     const { title, provider, model } = body as { title: string; provider: string; model: string };
     const id = `sess_${Date.now().toString(36)}`;
-    db.run("INSERT INTO sessions (id, title, provider, model) VALUES (?, ?, ?, ?)", [id, title, provider, model]);
+    db.run(
+      "INSERT INTO sessions (id, title, provider, model, user_id) VALUES (?, ?, ?, ?, ?)",
+      [id, title, provider, model, result.user.id]
+    );
     return db.query("SELECT * FROM sessions WHERE id = ?").get(id);
   })
-  .put("/:id", ({ params: { id }, body }) => {
+  .put("/:id", ({ params: { id }, body, headers }) => {
+    const result = requireAuth(headers["authorization"] ?? null);
+    if (result instanceof Response) return result;
+
     const db = getDb();
+    const session = db.query("SELECT user_id FROM sessions WHERE id = ?").get(id) as { user_id: number } | null;
+    if (!session) return new Response(JSON.stringify({ error: "Not found" }), { status: 404 });
+
+    if (result.user.role !== "admin" && session.user_id !== result.user.id) {
+      return new Response(JSON.stringify({ error: "Access denied" }), { status: 403 });
+    }
+
     const { title, provider, model, status } = body as Record<string, string>;
     const fields: string[] = [];
     const values: unknown[] = [];
@@ -62,17 +87,45 @@ export const sessionsRoutes = new Elysia({ prefix: "/api/sessions" })
     }
     return db.query("SELECT * FROM sessions WHERE id = ?").get(id);
   })
-  .delete("/:id", ({ params: { id } }) => {
+  .delete("/:id", ({ params: { id }, headers }) => {
+    const result = requireAuth(headers["authorization"] ?? null);
+    if (result instanceof Response) return result;
+
     const db = getDb();
+    const session = db.query("SELECT user_id FROM sessions WHERE id = ?").get(id) as { user_id: number } | null;
+    if (!session) return new Response(JSON.stringify({ error: "Not found" }), { status: 404 });
+
+    if (result.user.role !== "admin" && session.user_id !== result.user.id) {
+      return new Response(JSON.stringify({ error: "Access denied" }), { status: 403 });
+    }
+
     db.run("DELETE FROM sessions WHERE id = ?", [id]);
     return { success: true };
   })
-  .post("/:id/messages", ({ params: { id }, body }) => {
+  .post("/:id/messages", ({ params: { id }, body, headers }) => {
+    const result = requireAuth(headers["authorization"] ?? null);
+    if (result instanceof Response) return result;
+
     const db = getDb();
-    const { role, content, tokens, latency } = body as { role: string; content: string; tokens?: number; latency?: string };
-    db.run("INSERT INTO messages (session_id, role, content, tokens, latency) VALUES (?, ?, ?, ?, ?)",
-      [id, role, content, tokens || 0, latency || "—"]);
+    const session = db.query("SELECT user_id FROM sessions WHERE id = ?").get(id) as { user_id: number } | null;
+    if (!session) return new Response(JSON.stringify({ error: "Not found" }), { status: 404 });
+
+    if (result.user.role !== "admin" && session.user_id !== result.user.id) {
+      return new Response(JSON.stringify({ error: "Access denied" }), { status: 403 });
+    }
+
+    const { role, content, tokens, latency } = body as {
+      role: string;
+      content: string;
+      tokens?: number;
+      latency?: string;
+    };
+    db.run(
+      "INSERT INTO messages (session_id, role, content, tokens, latency) VALUES (?, ?, ?, ?, ?)",
+      [id, role, content, tokens || 0, latency || "—"]
+    );
     db.run("UPDATE sessions SET updated_at = datetime('now') WHERE id = ?", [id]);
-    const msgs = db.query("SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC").all(id);
-    return msgs;
+    return db
+      .query("SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC")
+      .all(id);
   });

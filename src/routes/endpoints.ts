@@ -1,5 +1,6 @@
 import { Elysia } from "elysia";
 import { getDb } from "../db";
+import { requireAdmin } from "../middleware/auth";
 
 interface EndpointRow {
   id: number;
@@ -30,17 +31,26 @@ function toEndpoint(row: EndpointRow) {
 }
 
 export const endpointsRoutes = new Elysia({ prefix: "/api/endpoints" })
-  .get("/", () => {
+  .get("/", ({ headers }) => {
+    const result = requireAdmin(headers["authorization"] ?? null);
+    if (result instanceof Response) return result;
+
     const db = getDb();
     const rows = db.query("SELECT * FROM endpoints ORDER BY id ASC").all() as EndpointRow[];
     return rows.map(toEndpoint);
   })
-  .get("/:id", ({ params: { id } }) => {
+  .get("/:id", ({ params: { id }, headers }) => {
+    const result = requireAdmin(headers["authorization"] ?? null);
+    if (result instanceof Response) return result;
+
     const db = getDb();
     const row = db.query("SELECT * FROM endpoints WHERE id = ?").get(id) as EndpointRow | undefined;
     return row ? toEndpoint(row) : null;
   })
-  .post("/", ({ body }) => {
+  .post("/", ({ body, headers }) => {
+    const result = requireAdmin(headers["authorization"] ?? null);
+    if (result instanceof Response) return result;
+
     const db = getDb();
     const { display_name, provider_name, provider_key, endpoint_url, model_name, api_key,
       price_input_per_m, price_output_per_m, price_cache_input_per_m, price_cache_output_per_m } =
@@ -63,7 +73,10 @@ export const endpointsRoutes = new Elysia({ prefix: "/api/endpoints" })
     const row = db.query("SELECT * FROM endpoints ORDER BY id DESC LIMIT 1").get() as EndpointRow;
     return toEndpoint(row);
   })
-  .put("/:id", ({ params: { id }, body }) => {
+  .put("/:id", ({ params: { id }, body, headers }) => {
+    const result = requireAdmin(headers["authorization"] ?? null);
+    if (result instanceof Response) return result;
+
     const db = getDb();
     const fields = body as Record<string, unknown>;
     const allowedFields = [
@@ -87,13 +100,19 @@ export const endpointsRoutes = new Elysia({ prefix: "/api/endpoints" })
     const row = db.query("SELECT * FROM endpoints WHERE id = ?").get(id) as EndpointRow | undefined;
     return row ? toEndpoint(row) : null;
   })
-  .delete("/:id", ({ params: { id } }) => {
+  .delete("/:id", ({ params: { id }, headers }) => {
+    const result = requireAdmin(headers["authorization"] ?? null);
+    if (result instanceof Response) return result;
+
     const db = getDb();
     db.run("DELETE FROM endpoints WHERE id = ?", [id]);
     return { success: true };
   })
   // Test endpoint connection (auto-detects OpenAI vs Anthropic format)
-  .post("/test", async ({ body }) => {
+  .post("/test", async ({ body, headers }) => {
+    const result = requireAdmin(headers["authorization"] ?? null);
+    if (result instanceof Response) return result;
+
     const { base_url, api_key, model_name } = body as {
       base_url: string;
       api_key: string;
