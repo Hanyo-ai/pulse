@@ -1,0 +1,25 @@
+{
+  "name": "sylvor-ai-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot src/index.ts",
+    "dev:watch": "bun --hot src/index.ts",
+    "build": "bun build ./src/index.html --outdir=dist --entry-naming \"[name].[ext]\" --sourcemap --target=browser --minify",
+    "start": "NODE_ENV=production bun src/index.ts"
+  },
+  "dependencies": {
+    "@elysiajs/cookie": "^0.8.0",
+    "@elysiajs/jwt": "^1.4.2",
+    "@elysiajs/static": "^1.4.10",
+    "elysia": "^1.4.29",
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/bun": "latest"
+  }
+}

@@ -1,0 +1,4 @@
+[install]
+# React 19 compatibility with Bun's bundler
+[define]
+"process.env.NODE_ENV" = "\"development\""
