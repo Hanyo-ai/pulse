@@ -1,4 +1,5 @@
 import { useState, useEffect, Fragment } from "react";
+import { t, useTranslation } from "../i18n";
 import type { Endpoint } from "../types";
 
 interface AddModalProps {
@@ -28,6 +29,7 @@ const labelStyle: React.CSSProperties = {
 };
 
 function AddModal({ onClose, onCreated, token }: AddModalProps) {
+  const { t } = useTranslation();
   const [displayName, setDisplayName] = useState("");
   const [providerName, setProviderName] = useState("");
   const [providerKey, setProviderKey] = useState("");
@@ -50,7 +52,7 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
 
   const testConnection = async () => {
     if (!endpointUrl || !apiKey) {
-      setError("请先填写 Base URL 和 API Key");
+      setError(t("ep.testFillFirst"));
       return;
     }
     setError("");
@@ -71,15 +73,15 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
       });
       const data = await res.json();
       if (!res.ok) {
-        setTestResult({ ok: false, msg: data.error || "测试失败" });
+        setTestResult({ ok: false, msg: data.error || t("ep.testFailed") });
         return;
       }
       setTestResult({
         ok: true,
-        msg: `连接成功！延迟 ${data.latency_ms}ms，测试模型: ${data.model_used}`,
+        msg: t("ep.testSuccess", { latency: data.latency_ms, model: data.model_used }),
       });
     } catch {
-      setTestResult({ ok: false, msg: "网络错误，无法测试连接" });
+      setTestResult({ ok: false, msg: t("ep.testNetworkError") });
     } finally {
       setTesting(false);
     }
@@ -111,14 +113,14 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
       });
       if (!res.ok) {
         const d = await res.json();
-        setError(d.error || "添加失败");
+        setError(d.error || t("ep.addFailed"));
         return;
       }
       const ep = await res.json() as Endpoint;
       setCreatedEndpoint(ep);
       onCreated();
     } catch {
-      setError("网络错误，请重试");
+      setError(t("ep.networkError"));
     } finally {
       setLoading(false);
     }
@@ -139,7 +141,7 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "20px" }}>
-          <h3 style={{ fontSize: "15px", fontWeight: 650 }}>添加 Endpoint</h3>
+          <h3 style={{ fontSize: "15px", fontWeight: 650 }}>{t("ep.addEndpoint")}</h3>
           <button
             onClick={onClose}
             style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: "18px", lineHeight: 1 }}
@@ -155,14 +157,14 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
               background: "oklch(95% 0.06 160)", color: "var(--green)",
               fontSize: "13px", fontWeight: 600,
             }}>
-              ✓ Endpoint 创建成功
+              ✓ {t("ep.created")}
             </div>
 
             <div style={{
               padding: "16px", borderRadius: "var(--radius-sm)",
               background: "oklch(97% 0.01 250)", border: "1px solid var(--border)",
             }}>
-              <h4 style={{ fontSize: "13px", fontWeight: 650, marginBottom: "12px" }}>外部连接信息</h4>
+              <h4 style={{ fontSize: "13px", fontWeight: 650, marginBottom: "12px" }}>{t("ep.externalInfo")}</h4>
 
               {[
                 { label: "Gateway Base URL", value: window.location.origin + "/v1", mono: true },
@@ -188,7 +190,7 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
                         borderRadius: "var(--radius-sm)", whiteSpace: "nowrap",
                       }}
                     >
-                      复制
+                      {t("ep.copy")}
                     </button>
                   </div>
                 </div>
@@ -198,7 +200,7 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
                 marginTop: "12px", padding: "10px", borderRadius: "var(--radius-sm)",
                 background: "oklch(96% 0.02 250)", fontSize: "12px", color: "var(--muted)",
               }}>
-                <strong>示例请求：</strong><br />
+                <strong>{t("ep.curlExample")}</strong><br />
                 <code style={{ fontSize: "11px" }}>
                   curl {window.location.origin}/v1/chat/completions \<br />
                   &nbsp;&nbsp;-H "Authorization: Bearer {createdEndpoint.gateway_key}" \<br />
@@ -209,7 +211,7 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
             </div>
 
             <button type="button" className="btn btn-primary" onClick={onClose} style={{ alignSelf: "flex-end" }}>
-              完成
+              {t("ep.cancel")}
             </button>
           </div>
         ) : (
@@ -222,10 +224,10 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
 
           {/* Custom Display Name */}
           <div>
-            <label style={labelStyle}>自定义名称 *</label>
+            <label style={labelStyle}>{t("ep.customName")}</label>
             <input
               type="text"
-              placeholder="例：生产环境 GPT-4o"
+              placeholder={t("ep.customNameHint")}
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               required
@@ -236,10 +238,10 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
           {/* Provider Name + Key in one row */}
           <div style={{ display: "flex", gap: "10px" }}>
             <div style={{ flex: 2 }}>
-              <label style={labelStyle}>供应商名称 *</label>
+              <label style={labelStyle}>{t("ep.providerName")}</label>
               <input
                 type="text"
-                placeholder="例：OpenAI"
+                placeholder={t("ep.providerKeyIdHint")}
                 value={providerName}
                 onChange={(e) => setProviderName(e.target.value)}
                 required
@@ -247,10 +249,10 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
               />
             </div>
             <div style={{ flex: 1 }}>
-              <label style={labelStyle}>标识 *</label>
+              <label style={labelStyle}>{t("ep.providerKeyId")}</label>
               <input
                 type="text"
-                placeholder="例：OA"
+                placeholder={t("ep.providerKeyHint")}
                 value={providerKey}
                 onChange={(e) => setProviderKey(e.target.value.toUpperCase().slice(0, 3))}
                 required
@@ -264,7 +266,7 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
             <label style={labelStyle}>Base URL *</label>
             <input
               type="url"
-              placeholder="例：https://api.openai.com/v1"
+              placeholder={t("ep.baseUrlHint")}
               value={endpointUrl}
               onChange={(e) => setEndpointUrl(e.target.value)}
               required
@@ -289,7 +291,7 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
             <label style={labelStyle}>Model *</label>
             <input
               type="text"
-              placeholder="例：gpt-4o-mini"
+              placeholder={t("ep.modelHint")}
               value={modelName}
               onChange={(e) => setModelName(e.target.value)}
               required
@@ -299,10 +301,10 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
 
           {/* Pricing Configuration */}
           <div style={{ padding: "12px", borderRadius: "var(--radius-sm)", background: "oklch(97% 0.01 250)", border: "1px solid var(--border)" }}>
-            <div style={{ fontSize: "12px", fontWeight: 650, marginBottom: "8px", color: "var(--fg)" }}>定价配置（$/M tokens）</div>
+            <div style={{ fontSize: "12px", fontWeight: 650, marginBottom: "8px", color: "var(--fg)" }}>{t("ep.pricingConfig")}</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
               <div>
-                <label style={labelStyle}>Input 价格</label>
+                <label style={labelStyle}>{t("ep.priceInput")}</label>
                 <input
                   type="number"
                   step="0.000001"
@@ -313,7 +315,7 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
                 />
               </div>
               <div>
-                <label style={labelStyle}>Output 价格</label>
+                <label style={labelStyle}>{t("ep.priceOutput")}</label>
                 <input
                   type="number"
                   step="0.000001"
@@ -324,7 +326,7 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
                 />
               </div>
               <div>
-                <label style={labelStyle}>缓存命中 Input 价格</label>
+                <label style={labelStyle}>{t("ep.priceCacheInput")}</label>
                 <input
                   type="number"
                   step="0.000001"
@@ -335,7 +337,7 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
                 />
               </div>
               <div>
-                <label style={labelStyle}>缓存命中 Output 价格</label>
+                <label style={labelStyle}>{t("ep.priceCacheOutput")}</label>
                 <input
                   type="number"
                   step="0.000001"
@@ -366,7 +368,7 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
                 cursor: testing ? "not-allowed" : "pointer",
               }}
             >
-              {testing ? "测试中…" : "🧪 测试连接"}
+              {testing ? t("ep.testConnecting") : t("ep.testConnection")}
             </button>
             {testResult && (
               <span style={{
@@ -382,10 +384,10 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
           {/* Submit */}
           <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "4px" }}>
             <button type="button" className="btn" style={{ border: "1px solid var(--border)" }} onClick={onClose}>
-              取消
+              {t("ep.cancel")}
             </button>
             <button type="submit" className="btn btn-primary" disabled={loading}>
-              {loading ? "添加中…" : "确认添加"}
+              {loading ? t("ep.submitting") : t("ep.confirm")}
             </button>
           </div>
         </form>
@@ -396,6 +398,7 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
 }
 
 function TestPanel({ ep }: { ep: Endpoint }) {
+  const { t } = useTranslation();
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<string>("");
   const [status, setStatus] = useState<number | null>(null);
@@ -486,7 +489,7 @@ function TestPanel({ ep }: { ep: Endpoint }) {
             className="btn btn-sm"
             style={{ fontSize: "11px", padding: "3px 10px", border: "1px solid var(--border)" }}
           >
-            📋 复制 curl
+            {t("ep.copyCurl")}
           </button>
           <button
             onClick={execute}
@@ -499,7 +502,7 @@ function TestPanel({ ep }: { ep: Endpoint }) {
               cursor: running ? "not-allowed" : "pointer",
             }}
           >
-            {running ? "执行中…" : "▶ 执行"}
+            {running ? t("ep.running") : t("ep.run")}
           </button>
         </div>
       </div>
@@ -520,8 +523,8 @@ function TestPanel({ ep }: { ep: Endpoint }) {
             color: status >= 200 && status < 300 ? "var(--green)" : "var(--red)",
           }}>
             <span>HTTP {status === 0 ? "Error" : status}</span>
-            {status >= 200 && status < 300 && <span>✓ 成功</span>}
-            {status >= 400 && <span>✗ 失败</span>}
+            {status >= 200 && status < 300 && <span>{t("ep.testSuccessLabel")}</span>}
+            {status >= 400 && <span>{t("ep.testFailLabel")}</span>}
           </div>
           <pre style={{
             margin: 0, padding: "12px", fontSize: "12px", lineHeight: "1.5",
@@ -529,7 +532,7 @@ function TestPanel({ ep }: { ep: Endpoint }) {
             borderRadius: "var(--radius-sm)", overflowX: "auto", whiteSpace: "pre-wrap",
             wordBreak: "break-all", maxHeight: "300px", overflowY: "auto",
           }}>
-            <code>{result || "(空响应)"}</code>
+            <code>{result || t("logs.emptyResponse")}</code>
           </pre>
         </div>
       )}
@@ -538,6 +541,7 @@ function TestPanel({ ep }: { ep: Endpoint }) {
 }
 
 export function Endpoints({ token }: { token: string }) {
+  const { t } = useTranslation();
   const [endpoints, setEndpoints] = useState<Endpoint[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -588,28 +592,28 @@ export function Endpoints({ token }: { token: string }) {
           gap: "10px",
         }}
       >
-        <p style={{ color: "var(--muted)", fontSize: "13px" }}>管理大模型供应商接入与端点状态</p>
-        <button className="btn btn-primary btn-sm" onClick={() => setShowModal(true)}>+ 添加</button>
+        <p style={{ color: "var(--muted)", fontSize: "13px" }}>{t("ep.title")}</p>
+        <button className="btn btn-primary btn-sm" onClick={() => setShowModal(true)}>{t("ep.add")}</button>
       </div>
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>名称</th>
-              <th>供应商</th>
-              <th>端点 URL</th>
-              <th>模型</th>
-              <th>状态</th>
-              <th>延迟</th>
-              <th>错误率</th>
-              <th>启用</th>
+              <th>{t("ep.colName")}</th>
+              <th>{t("ep.colProvider")}</th>
+              <th>{t("ep.colEndpointUrl")}</th>
+              <th>{t("ep.colModel")}</th>
+              <th>{t("ep.colStatus")}</th>
+              <th>{t("ep.colLatency")}</th>
+              <th>{t("ep.colErrorRate")}</th>
+              <th>{t("ep.colEnabled")}</th>
               <th style={{ width: "40px" }}></th>
             </tr>
           </thead>
           <tbody>
             {endpoints.length === 0 ? (
               <tr>
-                <td colSpan={9} style={{ textAlign: "center", color: "var(--muted)", padding: "24px" }}>暂无端点</td>
+                <td colSpan={9} style={{ textAlign: "center", color: "var(--muted)", padding: "24px" }}>{t("ep.noEndpoints")}</td>
               </tr>
             ) : endpoints.map((ep) => (
               <Fragment key={ep.id}>
@@ -641,7 +645,7 @@ export function Endpoints({ token }: { token: string }) {
                 <td className="mono" style={{ fontSize: "12px" }}>{ep.model_name || "—"}</td>
                 <td>
                   <span className={`cell-status ${ep.status === "healthy" ? "ok" : "err"}`}>
-                    {ep.status === "healthy" ? "健康" : "异常"}
+                    {ep.status === "healthy" ? t("ep.statusHealthy") : t("ep.statusUnhealthy")}
                   </span>
                 </td>
                 <td className="mono">{ep.latency_ms} ms</td>
@@ -670,7 +674,7 @@ export function Endpoints({ token }: { token: string }) {
                       whiteSpace: "nowrap",
                     }}
                   >
-                    🧪 测试
+                    {t("ep.testBtn")}
                   </button>
                 </td>
               </tr>

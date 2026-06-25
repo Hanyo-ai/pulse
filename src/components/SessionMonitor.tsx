@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useTranslation } from "../i18n";
 import type { Session, Message, AssistantResponse } from "../types";
 
 // ====================== SessionBar ======================
@@ -9,6 +10,7 @@ interface SessionBarProps {
 }
 
 function SessionBar({ sessions, activeSessionId, onSelect }: SessionBarProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const ref = useRef<HTMLDivElement>(null);
@@ -47,7 +49,7 @@ function SessionBar({ sessions, activeSessionId, onSelect }: SessionBarProps) {
           }}
         >
           <span className={`si-dot ${active ? dotClass(active.status) : "live"}`} />
-          <span className="si-name">{active?.title || "选择会话"}</span>
+          <span className="si-name">{active?.title || t("session.selectSession")}</span>
           <span className="si-provider">{active?.provider || ""}</span>
           <span className="si-chevron">▾</span>
         </button>
@@ -55,7 +57,7 @@ function SessionBar({ sessions, activeSessionId, onSelect }: SessionBarProps) {
           <div className="sb-search">
             <input
               type="text"
-              placeholder="搜索会话…"
+              placeholder={t("session.searchPlaceholder")}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onClick={(e) => e.stopPropagation()}
@@ -96,11 +98,11 @@ function SessionBar({ sessions, activeSessionId, onSelect }: SessionBarProps) {
         </div>
         <div className="ss-item">
           <div className="ss-val">{active?.latency || "—"}</div>
-          <div className="ss-lbl">延迟</div>
+          <div className="ss-lbl">{t("usage.avgLatency")}</div>
         </div>
         <div className="ss-item">
           <div className="ss-val">{active?.cost || "—"}</div>
-          <div className="ss-lbl">成本</div>
+          <div className="ss-lbl">{t("logs.cost")}</div>
         </div>
       </div>
     </div>
@@ -122,12 +124,13 @@ function parseContent(content: string): AssistantResponse | null {
 }
 
 function ThinkingBlock({ text }: { text: string }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   return (
     <div className="msg-thinking">
       <button className="msg-thinking-header" onClick={() => setOpen(!open)}>
         <span className="msg-thinking-arrow">{open ? "▾" : "▸"}</span>
-        <span>思考过程</span>
+        <span>{t("session.thinking")}</span>
       </button>
       {open && <div className="msg-thinking-content">{text}</div>}
     </div>
@@ -135,19 +138,20 @@ function ThinkingBlock({ text }: { text: string }) {
 }
 
 function UsageFooter({ usage, model, stopReason }: { usage?: AssistantResponse["usage"]; model?: string; stopReason?: string }) {
+  const { t } = useTranslation();
   if (!usage && !model && !stopReason) return null;
   return (
     <div className="msg-footer">
       {model && <span className="msg-footer-item msg-model-badge">{model}</span>}
       {usage && (
         <>
-          <span className="msg-footer-item">输入 {usage.input_tokens.toLocaleString()}</span>
-          <span className="msg-footer-item">输出 {usage.output_tokens.toLocaleString()}</span>
+          <span className="msg-footer-item">{t("session.input")} {usage.input_tokens.toLocaleString()}</span>
+          <span className="msg-footer-item">{t("session.output")} {usage.output_tokens.toLocaleString()}</span>
           {(usage.cache_read_input_tokens ?? 0) > 0 && (
-            <span className="msg-footer-item msg-cache-hit">缓存命中 {usage.cache_read_input_tokens!.toLocaleString()}</span>
+            <span className="msg-footer-item msg-cache-hit">{t("session.cacheHit")} {usage.cache_read_input_tokens!.toLocaleString()}</span>
           )}
           {(usage.cache_creation_input_tokens ?? 0) > 0 && (
-            <span className="msg-footer-item msg-cache-miss">缓存写入 {usage.cache_creation_input_tokens!.toLocaleString()}</span>
+            <span className="msg-footer-item msg-cache-miss">{t("session.cacheWrite")} {usage.cache_creation_input_tokens!.toLocaleString()}</span>
           )}
         </>
       )}
@@ -157,6 +161,7 @@ function UsageFooter({ usage, model, stopReason }: { usage?: AssistantResponse["
 }
 
 function ChatPanel({ messages, session }: ChatPanelProps) {
+  const { t } = useTranslation();
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -166,7 +171,7 @@ function ChatPanel({ messages, session }: ChatPanelProps) {
   if (!session) {
     return (
       <div className="chat-panel">
-        <div className="chat-empty">← 从上方下拉菜单中选择一个 Session<br />即可查看实时对话流</div>
+        <div className="chat-empty">{t("session.emptyHint1")}<br />{t("session.emptyHint2")}</div>
       </div>
     );
   }
@@ -174,7 +179,7 @@ function ChatPanel({ messages, session }: ChatPanelProps) {
   if (messages.length === 0) {
     return (
       <div className="chat-panel">
-        <div className="chat-empty">该会话暂无消息记录</div>
+        <div className="chat-empty">{t("session.noMessages")}</div>
       </div>
     );
   }
@@ -222,7 +227,7 @@ function ChatPanel({ messages, session }: ChatPanelProps) {
                 )}
                 {isBlocked && (
                   <div className="msg-meta">
-                    <span className="msg-error">请求被拦截</span>
+                    <span className="msg-error">{t("session.blocked")}</span>
                   </div>
                 )}
               </div>

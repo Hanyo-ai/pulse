@@ -118,7 +118,193 @@ src/
 
 ## 技术细节
 
-- 数据库文件：`pulse.db`（SQLite WAL 模式）
+- 数据库文件：`pulse.db`（SQLite WAL 模式），可通过 `DB_PATH` 环境变量自定义路径
 - 首次启动自动建表并创建默认管理员
 - API Key 在管理面板中脱敏显示（仅展示首尾各 4 位）
-- 开发模式使用双端口：Elysia API (`3000`) + Bun HMR (`3001`)，通过 WebSocket 代理实现热更新
+- 开发模式使用双端口 + WebSocket 代理实现 HMR 热更新
+- 生产模式单端口运行，通过 `NODE_ENV=production` 切换
+
+## 🚀 部署到服务器
+
+### 1. 服务器环境准备
+
+服务器需要安装 **Bun** >= 1.0：
+
+```bash
+# Linux / macOS 安装 Bun
+curl -fsSL https://bun.sh/install | bash
+
+# 验证安装
+bun --version
+```
+
+### 2. 上传项目
+
+```bash
+# 在服务器上克隆项目（或通过 rsync / scp 上传）
+git clone <your-repo-url> /opt/pulse
+cd /opt/pulse
+bun install --production
+```
+
+> 生产部署只需要 `bun install --production`（不含 devDependencies），但实际上 `@types/bun` 和 React 类型在生产中不需要。可以只用 `bun install`。
+
+### 3. 启动服务
+
+```bash
+# 直接启动（测试用，关闭终端会退出）
+NODE_ENV=production PORT=3000 DB_PATH=/data/pulse/pulse.db bun start
+
+# 或直接用
+NODE_ENV=production bun src/index.ts
+```
+
+### 4. 使用 systemd 守护进程（推荐）
+
+创建 `/etc/systemd/system/pulse.service`：
+
+```ini
+[Unit]
+Description=Pulse AI Gateway
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/pulse
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=DB_PATH=/data/pulse/pulse.db
+ExecStart=/root/.bun/bin/bun run /opt/pulse/src/index.ts
+Restart=always
+RestartSec=5
+
+# 安全加固
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/data/pulse
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+# 创建数据目录
+mkdir -p /data/pulse
+chown www-data:www-data /data/pulse
+
+# 启用并启动
+systemctl daemon-reload
+systemctl enable pulse
+systemctl start pulse
+
+# 查看状态
+systemctl status pulse
+journalctl -u pulse -f
+```
+
+### 5. 反向代理（Nginx + HTTPS）
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name pulse.your-domain.com;
+
+    ssl_certificate     /etc/letsencrypt/live/pulse.your-domain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/pulse.your-domain.com/privkey.pem;
+
+    # 管理面板
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # API & Gateway 代理（支持 SSE 流式）
+    location /api/ {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_buffering off;
+        proxy_cache off;
+        chunked_transfer_encoding on;
+    }
+
+    location /v1/ {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_buffering off;
+        proxy_cache off;
+        chunked_transfer_encoding on;
+    }
+
+    location /anthropic/ {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_buffering off;
+        proxy_cache off;
+        chunked_transfer_encoding on;
+    }
+}
+
+# HTTP → HTTPS 重定向
+server {
+    listen 80;
+    server_name pulse.your-domain.com;
+    return 301 https://$host$request_uri;
+}
+```
+
+```bash
+# 申请 SSL 证书（使用 certbot）
+certbot --nginx -d pulse.your-domain.com
+
+# 重载 nginx
+systemctl reload nginx
+```
+
+### 6. Caddy 反向代理（更简单的替代方案）
+
+如果用 Caddy 代替 Nginx，只需一个 `Caddyfile`：
+
+```caddyfile
+pulse.your-domain.com {
+    reverse_proxy localhost:3000
+}
+```
+
+Caddy 自动申请和续签 SSL 证书。
+
+### 7. 环境变量参考
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `NODE_ENV` | — | 设为 `production` 切换生产模式 |
+| `PORT` | `3000` | 服务监听端口 |
+| `DB_PATH` | `pulse.db` | SQLite 数据库文件路径 |
+
+### 8. 首次登录
+
+部署后访问 `https://pulse.your-domain.com`，使用默认管理员账号：
+
+- 用户名：`admin`
+- 密码：`admin123`
+
+> ⚠️ **立即修改默认密码！** 登录后进入「用户管理」页面修改。
+
+### 9. 备份数据库
+
+```bash
+# 定期备份 SQLite 数据库
+cp /data/pulse/pulse.db /backup/pulse_$(date +%Y%m%d).db
+
+# 或添加 crontab 自动备份
+0 3 * * * cp /data/pulse/pulse.db /backup/pulse_$(date +\%Y\%m\%d).db
+```

@@ -68,6 +68,47 @@ export const authRoutes = new Elysia({ prefix: "/api/auth" })
     }
     return { success: true };
   })
+  // Self-service: change password
+  .post("/change-password", async ({ body, headers }) => {
+    const result = requireAuth(headers["authorization"] ?? null);
+    if (result instanceof Response) return result;
+
+    const db = getDb();
+    const { oldPassword, newPassword } = body as { oldPassword: string; newPassword: string };
+
+    if (!oldPassword || !newPassword) {
+      return new Response(JSON.stringify({ error: "Both old and new password are required" }), {
+        status: 400, headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (newPassword.length < 8) {
+      return new Response(JSON.stringify({ error: "New password must be at least 8 characters" }), {
+        status: 400, headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const user = db.query("SELECT password_hash FROM users WHERE id = ?").get(result.user.id) as { password_hash: string } | null;
+    if (!user) {
+      return new Response(JSON.stringify({ error: "User not found" }), {
+        status: 404, headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const valid = await Bun.password.verify(oldPassword, user.password_hash);
+    if (!valid) {
+      return new Response(JSON.stringify({ error: "Current password is incorrect" }), {
+        status: 400, headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const passwordHash = await Bun.password.hash(newPassword, "bcrypt");
+    db.run("UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?", [passwordHash, result.user.id]);
+
+    // Invalidate all other sessions (keep current one by token)
+    db.run("DELETE FROM auth_sessions WHERE user_id = ? AND token != ?", [result.user.id, result.token]);
+
+    return { success: true };
+  })
   .get("/me", ({ headers }) => {
     const result = requireAuth(headers["authorization"] ?? null);
     if (result instanceof Response) return result;

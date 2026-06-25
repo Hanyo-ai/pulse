@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 
-const DB_PATH = "pulse.db";
+const DB_PATH = process.env.DB_PATH || "pulse.db";
 
 // Singleton pattern for database
 let _db: Database | null = null;

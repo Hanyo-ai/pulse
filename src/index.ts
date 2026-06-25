@@ -361,14 +361,18 @@ async function proxyAnthropic(gatewayKey: string, request: Request, set: { statu
   }
 }
 
-// === Frontend dev server with HMR (internal port) ===
-const frontendServer = Bun.serve({
-  port: 3001,
-  routes: {
-    "/*": index,
-  },
-  development: { hmr: true },
-});
+// === Environment & Port ===
+const isProduction = process.env.NODE_ENV === "production";
+const PORT = parseInt(process.env.PORT || "3000", 10);
+
+// === Frontend dev server with HMR (internal port, dev only) ===
+if (!isProduction) {
+  Bun.serve({
+    port: PORT + 1,
+    routes: { "/*": index },
+    development: { hmr: true },
+  });
+}
 
 const app = new Elysia()
   // API routes first (matched before catch-all)
@@ -399,49 +403,66 @@ const app = new Elysia()
     return result;
   });
 
-// === Unified server: Bun.serve on port 3000 ===
-// WebSocket upgrades for /_bun/hmr → forward to HMR server on :3001
-// All other requests → Elysia
-Bun.serve({
-  port: 3000,
-  websocket: {
-    open(ws) {
-      // Proxy WS connection to HMR server
-      const target = new WebSocket("ws://localhost:3001/_bun/hmr");
-      (ws as unknown as { data: { target: WebSocket } }).data = { target };
-      target.addEventListener("message", (e) => {
-        if (ws.readyState === WebSocket.OPEN) ws.send(e.data);
-      });
-      target.addEventListener("close", () => ws.close());
+// === Production: serve frontend + API directly via Elysia ===
+if (isProduction) {
+  app.get("*", async ({ set, path }) => {
+    const filePath = `./src${path}`;
+    const file = Bun.file(filePath);
+    if (await file.exists()) {
+      const ext = path.split(".").pop() || "";
+      const mime: Record<string, string> = {
+        html: "text/html", css: "text/css", js: "application/javascript",
+        tsx: "application/javascript", ts: "application/javascript",
+        svg: "image/svg+xml", png: "image/png", ico: "image/x-icon",
+      };
+      set.headers["Content-Type"] = mime[ext] || "application/octet-stream";
+      return file;
+    }
+    // SPA fallback
+    set.headers["Content-Type"] = "text/html; charset=utf-8";
+    return Bun.file("./src/index.html");
+  });
+  app.listen(PORT);
+  console.log(`🚀 Pulse AI Gateway running on http://0.0.0.0:${PORT} (production)`);
+} else {
+  // === Dev: Bun.serve with HMR proxy ===
+  Bun.serve({
+    port: PORT,
+    websocket: {
+      open(ws) {
+        const target = new WebSocket(`ws://localhost:${PORT + 1}/_bun/hmr`);
+        (ws as unknown as { data: { target: WebSocket } }).data = { target };
+        target.addEventListener("message", (e) => {
+          if (ws.readyState === WebSocket.OPEN) ws.send(e.data);
+        });
+        target.addEventListener("close", () => ws.close());
+      },
+      message(ws, message) {
+        const data = ws.data as { target: WebSocket } | undefined;
+        if (data?.target && data.target.readyState === WebSocket.OPEN) {
+          data.target.send(message);
+        }
+      },
+      close(ws) {
+        const data = ws.data as { target: WebSocket } | undefined;
+        data?.target?.close();
+      },
     },
-    message(ws, message) {
-      const data = ws.data as { target: WebSocket } | undefined;
-      if (data?.target && data.target.readyState === WebSocket.OPEN) {
-        data.target.send(message);
+    fetch(req, server) {
+      const url = new URL(req.url);
+      // Proxy /_bun/hmr WebSocket upgrade to HMR server
+      if (url.pathname === "/_bun/hmr" && req.headers.get("Upgrade")?.toLowerCase() === "websocket") {
+        if (server.upgrade(req)) return;
       }
+      // Proxy frontend requests to HMR server
+      if (!url.pathname.startsWith("/api/") && !url.pathname.startsWith("/v1/") && !url.pathname.startsWith("/anthropic/")) {
+        const target = new URL(req.url);
+        target.port = `${PORT + 1}`;
+        return fetch(target, req);
+      }
+      // Delegate API requests to Elysia
+      return app.fetch(req);
     },
-    close(ws) {
-      const data = ws.data as { target: WebSocket } | undefined;
-      data?.target?.close();
-    },
-  },
-  fetch(req, server) {
-    const url = new URL(req.url);
-    // Proxy /_bun/hmr WebSocket upgrade to HMR server
-    if (url.pathname === "/_bun/hmr" && req.headers.get("Upgrade")?.toLowerCase() === "websocket") {
-      if (server.upgrade(req)) return;
-    }
-    // Proxy frontend requests to HMR server (skip API routes)
-    if (!url.pathname.startsWith("/api/") && !url.pathname.startsWith("/v1/") && !url.pathname.startsWith("/anthropic/")) {
-      const target = new URL(req.url);
-      target.port = "3001";
-      return fetch(target, req);
-    }
-    // Delegate API requests to Elysia
-    return app.fetch(req);
-  },
-});
-
-console.log(`🚀 SYLVOR AI Gateway running at http://localhost:3000/`);
-console.log(`📊 API: http://localhost:3000/api/health`);
-console.log(`🎨 Frontend (dev): http://localhost:3001/ (proxied through :3000)`);
+  });
+  console.log(`🔥 Pulse AI Gateway running on http://localhost:${PORT} (dev + HMR)`);
+}

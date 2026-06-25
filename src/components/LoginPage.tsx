@@ -1,11 +1,13 @@
 import { useState } from "react";
 import type { User } from "../types";
+import { useTranslation } from "../i18n";
 
 interface LoginPageProps {
   onLogin: (user: User, token: string) => void;
 }
 
 export function LoginPage({ onLogin }: LoginPageProps) {
+  const { t } = useTranslation();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -23,7 +25,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     const data = await res.json();
 
     if (!res.ok) {
-      setError(data.error || "登录失败");
+      setError(data.error || t("login.error"));
       return;
     }
 
@@ -44,9 +46,9 @@ export function LoginPage({ onLogin }: LoginPageProps) {
           >
             S
           </div>
-          <h2 style={{ fontSize: "20px", fontWeight: 650 }}>SYLVOR AI Gateway</h2>
+          <h2 style={{ fontSize: "20px", fontWeight: 650 }}>PULSE AI Gateway</h2>
           <p style={{ color: "var(--muted)", fontSize: "13px", marginTop: "4px" }}>
-            登录管理面板
+            {t("login.title")}
           </p>
         </div>
 
@@ -59,7 +61,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
 
           <div>
             <label style={{ fontSize: "12px", fontWeight: 600, color: "var(--muted)", display: "block", marginBottom: "4px" }}>
-              用户名
+              {t("login.username")}
             </label>
             <input
               type="text"
@@ -82,7 +84,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
 
           <div>
             <label style={{ fontSize: "12px", fontWeight: 600, color: "var(--muted)", display: "block", marginBottom: "4px" }}>
-              密码
+              {t("login.password")}
             </label>
             <input
               type="password"
@@ -103,12 +105,12 @@ export function LoginPage({ onLogin }: LoginPageProps) {
           </div>
 
           <button type="submit" className="btn btn-primary" style={{ width: "100%", justifyContent: "center", padding: "10px" }}>
-            登录
+            {t("login.submit")}
           </button>
         </form>
 
         <p style={{ textAlign: "center", marginTop: "16px", fontSize: "13px", color: "var(--muted)" }}>
-          需要注册？请联系管理员
+          {t("login.needRegister")}
         </p>
       </div>
     </section>

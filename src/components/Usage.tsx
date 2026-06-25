@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { t, useTranslation } from "../i18n";
 import type { UsageStats } from "../types";
 
 interface ModelBreakdown {
@@ -55,7 +56,7 @@ function renderChart(trend: TrendPoint[]) {
 
   const dayLabels = days.map((d) => {
     const date = new Date(d + "T00:00:00");
-    return ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][date.getDay()];
+    return [t("day.sun"), t("day.mon"), t("day.tue"), t("day.wed"), t("day.thu"), t("day.fri"), t("day.sat")][date.getDay()];
   });
 
   return (
@@ -101,6 +102,7 @@ interface UsageProps {
 }
 
 export function Usage({ token }: UsageProps) {
+  const { t } = useTranslation();
   const [stats, setStats] = useState<UsageStats>({
     totalTokens: "—",
     totalRequests: "—",
@@ -138,17 +140,17 @@ export function Usage({ token }: UsageProps) {
     <section className="section active" style={{ overflowY: "auto", padding: "24px" }}>
       <div className="filter-bar">
         <select>
-          <option>最近 7 天</option>
-          <option>最近 24 小时</option>
-          <option>最近 30 天</option>
+          <option>{t("usage.last7d")}</option>
+          <option>{t("usage.last24h")}</option>
+          <option>{t("usage.last30d")}</option>
         </select>
         <select>
-          <option>全部供应商</option>
+          <option>{t("usage.allProviders")}</option>
           <option>OpenAI</option>
           <option>Anthropic</option>
         </select>
         <select>
-          <option>全部模型</option>
+          <option>{t("usage.allModels")}</option>
           <option>gpt-4o</option>
           <option>gpt-4o-mini</option>
           <option>claude-sonnet-4</option>
@@ -158,33 +160,33 @@ export function Usage({ token }: UsageProps) {
 
       <div className="grid-5" style={{ marginBottom: "18px" }}>
         <div className="stat-card">
-          <div className="stat-label">总 Token 用量</div>
+          <div className="stat-label">{t("usage.totalTokens")}</div>
           <div className="stat-value">{stats.totalTokens}</div>
           <div className="stat-sub" style={{ color: "var(--green)" }}>
             &nbsp;
           </div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">总请求数</div>
+          <div className="stat-label">{t("usage.totalRequests")}</div>
           <div className="stat-value">{stats.totalRequests}</div>
           <div className="stat-sub">&nbsp;</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">平均延迟</div>
+          <div className="stat-label">{t("usage.avgLatency")}</div>
           <div className="stat-value">{stats.avgLatency}</div>
           <div className="stat-sub" style={{ color: "var(--green)" }}>
             &nbsp;
           </div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">缓存命中率</div>
+          <div className="stat-label">{t("usage.cacheHitRate")}</div>
           <div className="stat-value">{stats.cacheHitRate}</div>
           <div className="stat-sub" style={{ color: "var(--green)" }}>
             prompt cache
           </div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">预估成本</div>
+          <div className="stat-label">{t("usage.estimatedCost")}</div>
           <div className="stat-value">{stats.estimatedCost}</div>
           <div className="stat-sub">&nbsp;</div>
         </div>
@@ -192,32 +194,32 @@ export function Usage({ token }: UsageProps) {
 
       <div className="card" style={{ marginBottom: "18px" }}>
         <div className="card-header">
-          <h3>Token 用量趋势</h3>
-          <span style={{ fontSize: "12px", color: "var(--muted)" }}>单位：tokens</span>
+          <h3>{t("usage.tokenTrend")}</h3>
+          <span style={{ fontSize: "12px", color: "var(--muted)" }}>{t("usage.unitTokens")}</span>
         </div>
         {trend.length > 0 ? (
           renderChart(trend)
         ) : (
           <div style={{ height: "240px", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)", fontSize: "13px" }}>
-            暂无数据
+            {t("usage.noData")}
           </div>
         )}
       </div>
 
       <div className="card">
         <div className="card-header">
-          <h3>按模型拆分</h3>
+          <h3>{t("usage.byModel")}</h3>
         </div>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>模型</th>
-                <th>供应商</th>
-                <th>请求数</th>
-                <th>Token 用量</th>
-                <th>平均延迟</th>
-                <th>成本</th>
+                <th>{t("usage.colModel")}</th>
+                <th>{t("usage.colProvider")}</th>
+                <th>{t("usage.colRequests")}</th>
+                <th>{t("usage.colTokens")}</th>
+                <th>{t("usage.colAvgLatency")}</th>
+                <th>{t("usage.colCost")}</th>
               </tr>
             </thead>
             <tbody>
@@ -234,7 +236,7 @@ export function Usage({ token }: UsageProps) {
                   ))
                 : (
                   <tr>
-                    <td colSpan={6} style={{ textAlign: "center", color: "var(--muted)", padding: "24px" }}>暂无数据</td>
+                    <td colSpan={6} style={{ textAlign: "center", color: "var(--muted)", padding: "24px" }}>{t("usage.noData")}</td>
                   </tr>
                 )}
             </tbody>

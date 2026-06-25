@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { t, useTranslation } from "../i18n";
 import type { RequestLog } from "../types";
 
 interface AuditLogsProps {
@@ -6,7 +7,7 @@ interface AuditLogsProps {
 }
 
 function formatJson(raw: string): string {
-  if (!raw) return "(空响应)";
+  if (!raw) return t("logs.emptyResponse");
   try {
     return JSON.stringify(JSON.parse(raw), null, 2);
   } catch {
@@ -15,11 +16,15 @@ function formatJson(raw: string): string {
 }
 
 export function AuditLogs({ token }: AuditLogsProps) {
+  const { t } = useTranslation();
   const [logs, setLogs] = useState<RequestLog[]>([]);
   const [search, setSearch] = useState("");
-  const [provider, setProvider] = useState("全部供应商");
-  const [status, setStatus] = useState("全部状态");
+  const [provider, setProvider] = useState("");
+  const [status, setStatus] = useState("");
   const [selectedLog, setSelectedLog] = useState<RequestLog | null>(null);
+
+  const allProviders = t("logs.allProviders");
+  const allStatus = t("logs.allStatus");
 
   useEffect(() => {
     fetch("/api/logs", {
@@ -28,12 +33,25 @@ export function AuditLogs({ token }: AuditLogsProps) {
       .then((r) => r.json())
       .then((data) => {
         if (Array.isArray(data)) setLogs(data);
+        // Initialize filter defaults after translation is available
+        if (!provider) setProvider(allProviders);
+        if (!status) setStatus(allStatus);
       })
       .catch(console.error);
-  }, [token]);
+  }, [token, allProviders, allStatus]);
+
+  // Keep state in sync with translations
+  useEffect(() => {
+    if (provider && provider !== allProviders && provider !== "OpenAI" && provider !== "Anthropic") setProvider(allProviders);
+  }, [allProviders]);
+
+  useEffect(() => {
+    const statusValues = ["2xx", "4xx", "5xx"];
+    if (status && status !== allStatus && !statusValues.includes(status)) setStatus(allStatus);
+  }, [allStatus]);
 
   const filtered = logs.filter((l) => {
-    if (provider !== "全部供应商" && l.provider !== provider) return false;
+    if (provider !== t("logs.allProviders") && l.provider !== provider) return false;
     if (search && !l.request_id.toLowerCase().includes(search.toLowerCase())) return false;
     if (status === "2xx" && (l.status_code < 200 || l.status_code >= 300)) return false;
     if (status === "4xx" && (l.status_code < 400 || l.status_code >= 500)) return false;
@@ -53,17 +71,17 @@ export function AuditLogs({ token }: AuditLogsProps) {
       <div className="filter-bar">
         <input
           type="text"
-          placeholder="搜索请求 ID…"
+          placeholder={t("logs.searchPlaceholder")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
         <select value={provider} onChange={(e) => setProvider(e.target.value)}>
-          <option>全部供应商</option>
+          <option>{t("logs.allProviders")}</option>
           <option>OpenAI</option>
           <option>Anthropic</option>
         </select>
         <select value={status} onChange={(e) => setStatus(e.target.value)}>
-          <option>全部状态</option>
+          <option>{t("logs.allStatus")}</option>
           <option>2xx</option>
           <option>4xx</option>
           <option>5xx</option>
@@ -73,15 +91,15 @@ export function AuditLogs({ token }: AuditLogsProps) {
         <table>
           <thead>
             <tr>
-              <th>时间</th>
-              <th>请求 ID</th>
+              <th>{t("logs.time")}</th>
+              <th>{t("logs.requestId")}</th>
               <th>Session</th>
-              <th>供应商</th>
-              <th>模型</th>
-              <th>状态</th>
-              <th>延迟</th>
+              <th>{t("logs.provider")}</th>
+              <th>{t("logs.model")}</th>
+              <th>{t("logs.status")}</th>
+              <th>{t("logs.latency")}</th>
               <th>Tokens</th>
-              <th>成本</th>
+              <th>{t("logs.cost")}</th>
             </tr>
           </thead>
           <tbody>
@@ -91,7 +109,7 @@ export function AuditLogs({ token }: AuditLogsProps) {
                 className="log-row"
                 style={{ cursor: (l.response_body || l.request_body) ? "pointer" : "default" }}
                 onClick={() => (l.response_body || l.request_body) && setSelectedLog(l)}
-                title={l.response_body || l.request_body ? "点击查看请求/响应" : ""}
+                title={l.response_body || l.request_body ? t("logs.clickHint") : ""}
               >
                 <td className="mono">
                   {new Date(l.created_at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
@@ -120,7 +138,7 @@ export function AuditLogs({ token }: AuditLogsProps) {
           <div className="log-modal card" onClick={(e) => e.stopPropagation()}>
             <div className="log-modal-header">
               <div>
-                <h3>请求详情</h3>
+                <h3>{t("logs.detailTitle")}</h3>
                 <div className="log-modal-meta">
                   <span className="mono">{selectedLog.request_id}</span>
                   <span>·</span>
@@ -152,7 +170,7 @@ export function AuditLogs({ token }: AuditLogsProps) {
                 </div>
               )}
               {!selectedLog.request_body && !selectedLog.response_body && (
-                <div style={{ textAlign: "center", color: "var(--muted)", padding: "24px" }}>无请求/响应数据</div>
+                  <div style={{ textAlign: "center", color: "var(--muted)", padding: "24px" }}>{t("logs.noData")}</div>
               )}
             </div>
           </div>

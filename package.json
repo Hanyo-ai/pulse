@@ -1,6 +1,6 @@
 {
-  "name": "sylvor-ai-gateway",
-  "version": "1.0.0",
+  "name": "pulse-ai-gateway",
+  "version": "0.0.1",
   "private": true,
   "type": "module",
   "scripts": {

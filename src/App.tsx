@@ -9,12 +9,14 @@ import { Usage } from "./components/Usage";
 import { LoginPage } from "./components/LoginPage";
 import UserManagement from "./components/UserManagement";
 import type { Section, Session, Message, User } from "./types";
+import { useTranslation } from "./i18n";
 
 function authHeaders(token: string): HeadersInit {
   return { Authorization: `Bearer ${token}` };
 }
 
 export function App() {
+  const { t } = useTranslation();
   const [section, setSection] = useState<Section>("session-monitor");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
@@ -130,6 +132,7 @@ export function App() {
         sessionCount={activeCount}
         user={user}
         open={sidebarOpen}
+        token={token}
       />
 
       <main className="main">
@@ -159,7 +162,7 @@ export function App() {
             <UserManagement token={token} currentUser={user} />
           )}
           {!isAdmin && (section === "endpoints" || section === "users") && (
-            <div style={{ padding: "2rem", color: "var(--muted)" }}>无权访问</div>
+            <div style={{ padding: "2rem", color: "var(--muted)" }}>{t("app.noAccess")}</div>
           )}
         </div>
       </main>
@@ -173,7 +176,7 @@ export function App() {
             <rect x="1" y="1" width="18" height="18" rx="3" />
             <circle cx="10" cy="10" r="2.5" />
           </svg>
-          会话
+          {t("nav.sessionMonitor")}
         </button>
         {isAdmin && (
           <button
@@ -184,7 +187,7 @@ export function App() {
               <circle cx="10" cy="10" r="3.5" />
               <path d="M10 1.5v3m0 11v3M1.5 10h3m11 0h3" />
             </svg>
-            端点
+            {t("nav.endpoints")}
           </button>
         )}
         <button
@@ -195,7 +198,7 @@ export function App() {
             <rect x="3" y="11" width="3" height="7" rx="0.5" />
             <rect x="8.5" y="6" width="3" height="12" rx="0.5" />
           </svg>
-          用量
+          {t("nav.usage")}
         </button>
       </nav>
     </>

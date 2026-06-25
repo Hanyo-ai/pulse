@@ -170,6 +170,7 @@ body {
   gap: 10px;
   font-size: 12px;
   color: var(--muted);
+  position: relative;
 }
 
 .sidebar-footer .avatar {
@@ -182,6 +183,213 @@ body {
   font-weight: 600;
   font-size: 11px;
   color: var(--fg);
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.sidebar-footer .avatar:hover {
+  background: oklch(84% 0.03 250);
+}
+
+/* ---- Settings modal ---- */
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 600;
+}
+
+.settings-modal {
+  width: 580px;
+  max-width: 94%;
+  height: 380px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.14);
+  display: flex;
+  overflow: hidden;
+}
+
+/* ---- Left sidebar ---- */
+.settings-sidebar {
+  width: 180px;
+  flex-shrink: 0;
+  background: oklch(98% 0.003 250);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-sidebar-header {
+  padding: 16px 16px 12px;
+}
+
+.settings-sidebar-header h3 {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--fg);
+}
+
+.settings-nav {
+  flex: 1;
+  padding: 4px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  font-size: 13px;
+  font-family: var(--font);
+  color: var(--fg);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+}
+
+.settings-nav-item:hover {
+  background: oklch(94% 0.005 250);
+}
+
+.settings-nav-item.active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.settings-sidebar-footer {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* ---- Right content ---- */
+.settings-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.settings-content-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-content-header h3 {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.settings-modal-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.settings-content-body {
+  flex: 1;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+/* ---- Language select ---- */
+.settings-select {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: 13px var(--font);
+  background: var(--bg);
+  color: var(--fg);
+  outline: none;
+  cursor: pointer;
+  box-sizing: border-box;
+  appearance: auto;
+}
+
+.settings-select:focus {
+  border-color: var(--accent);
+}
+
+/* ---- Password form ---- */
+.settings-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.settings-field {
+  margin-bottom: 12px;
+}
+
+.settings-field input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: 13px var(--font);
+  background: var(--bg);
+  color: var(--fg);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.settings-field input:focus {
+  border-color: var(--accent);
+}
+
+.settings-msg {
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+.settings-msg.error {
+  background: oklch(95% 0.04 25);
+  color: var(--red);
+}
+
+.settings-msg.success {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+/* ---- GitHub link ---- */
+.github-link {
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+  transition: color 0.15s;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+}
+
+.github-link:hover {
+  color: var(--fg);
+  background: oklch(97% 0.005 250);
 }
 
 /* ========== Main ========== */

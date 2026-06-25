@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useTranslation } from "../i18n";
 import type { User } from "../types";
 
 interface UserManagementProps {
@@ -27,6 +28,7 @@ const labelStyle: React.CSSProperties = {
 };
 
 export default function UserManagement({ token, currentUser }: UserManagementProps) {
+  const { t } = useTranslation();
   const [users, setUsers] = useState<User[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -100,7 +102,7 @@ export default function UserManagement({ token, currentUser }: UserManagementPro
         setShowModal(false);
       } else {
         const data = await res.json();
-        setError(data.error || "更新失败");
+        setError(data.error || t("users.updateFailed"));
       }
     } else {
       const res = await fetch("/api/auth/users", {
@@ -117,13 +119,13 @@ export default function UserManagement({ token, currentUser }: UserManagementPro
         setShowModal(false);
       } else {
         const data = await res.json();
-        setError(data.error || "创建失败");
+        setError(data.error || t("users.createFailed"));
       }
     }
   };
 
   const handleDelete = async (user: User) => {
-    if (!confirm(`确定删除用户 ${user.username}？`)) return;
+    if (!confirm(t("users.deleteConfirm", { username: user.username }))) return;
     const res = await fetch(`/api/auth/users/${user.id}`, {
       method: "DELETE",
       headers: { Authorization: `Bearer ${token}` },
@@ -132,7 +134,7 @@ export default function UserManagement({ token, currentUser }: UserManagementPro
       await loadUsers();
     } else {
       const data = await res.json();
-      alert(data.error || "删除失败");
+      alert(data.error || t("users.deleteFailed"));
     }
   };
 
@@ -158,25 +160,25 @@ export default function UserManagement({ token, currentUser }: UserManagementPro
           gap: "10px",
         }}
       >
-        <p style={{ color: "var(--muted)", fontSize: "13px" }}>管理系统用户与权限</p>
-        <button className="btn btn-primary btn-sm" onClick={handleCreate}>+ 新增用户</button>
+        <p style={{ color: "var(--muted)", fontSize: "13px" }}>{t("users.title")}</p>
+        <button className="btn btn-primary btn-sm" onClick={handleCreate}>{t("users.add")}</button>
       </div>
 
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>用户名</th>
-              <th>显示名称</th>
-              <th>角色</th>
-              <th>创建时间</th>
-              <th style={{ width: "160px" }}>操作</th>
+              <th>{t("users.colUsername")}</th>
+              <th>{t("users.colDisplayName")}</th>
+              <th>{t("users.colRole")}</th>
+              <th>{t("users.colCreated")}</th>
+              <th style={{ width: "160px" }}>{t("users.colActions")}</th>
             </tr>
           </thead>
           <tbody>
             {users.length === 0 ? (
               <tr>
-                <td colSpan={5} style={{ textAlign: "center", color: "var(--muted)", padding: "24px" }}>暂无用户</td>
+                <td colSpan={5} style={{ textAlign: "center", color: "var(--muted)", padding: "24px" }}>{t("users.noUsers")}</td>
               </tr>
             ) : users.map((user) => (
               <tr key={user.id}>
@@ -184,13 +186,13 @@ export default function UserManagement({ token, currentUser }: UserManagementPro
                 <td>{user.display_name || "—"}</td>
                 <td>
                   <span style={roleBadgeStyle(user.role)}>
-                    {user.role === "admin" ? "管理员" : "普通用户"}
+                    {user.role === "admin" ? t("role.admin") : t("role.user")}
                   </span>
                 </td>
                 <td className="mono">{user.created_at ? new Date(user.created_at).toLocaleDateString("zh-CN") : "—"}</td>
                 <td>
                   <button className="btn btn-sm" style={{ marginRight: "6px" }} onClick={() => handleEdit(user)}>
-                    编辑
+                    {t("users.edit")}
                   </button>
                   {user.id !== currentUser.id && (
                     <button
@@ -198,7 +200,7 @@ export default function UserManagement({ token, currentUser }: UserManagementPro
                       style={{ color: "var(--red)", borderColor: "var(--red)" }}
                       onClick={() => handleDelete(user)}
                     >
-                      删除
+                      {t("users.delete")}
                     </button>
                   )}
                 </td>
@@ -223,7 +225,7 @@ export default function UserManagement({ token, currentUser }: UserManagementPro
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "20px" }}>
-              <h3 style={{ fontSize: "15px", fontWeight: 650 }}>{editingUser ? "编辑用户" : "新增用户"}</h3>
+              <h3 style={{ fontSize: "15px", fontWeight: 650 }}>{editingUser ? t("users.editUser") : t("users.newUser")}</h3>
               <button
                 onClick={() => setShowModal(false)}
                 style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: "18px", lineHeight: 1 }}
@@ -244,7 +246,7 @@ export default function UserManagement({ token, currentUser }: UserManagementPro
 
             <form onSubmit={handleSubmit}>
               <div style={{ marginBottom: "14px" }}>
-                <label style={labelStyle}>用户名</label>
+                <label style={labelStyle}>{t("users.colUsername")}</label>
                 <input
                   type="text"
                   value={formData.username}
@@ -256,7 +258,7 @@ export default function UserManagement({ token, currentUser }: UserManagementPro
               </div>
               <div style={{ marginBottom: "14px" }}>
                 <label style={labelStyle}>
-                  密码 {editingUser ? "(留空保持不变)" : ""}
+                  {t("users.password")} {editingUser ? t("users.passwordHint") : ""}
                 </label>
                 <input
                   type="password"
@@ -267,7 +269,7 @@ export default function UserManagement({ token, currentUser }: UserManagementPro
                 />
               </div>
               <div style={{ marginBottom: "14px" }}>
-                <label style={labelStyle}>显示名称</label>
+                <label style={labelStyle}>{t("users.colDisplayName")}</label>
                 <input
                   type="text"
                   value={formData.display_name}
@@ -276,22 +278,22 @@ export default function UserManagement({ token, currentUser }: UserManagementPro
                 />
               </div>
               <div style={{ marginBottom: "14px" }}>
-                <label style={labelStyle}>角色</label>
+                <label style={labelStyle}>{t("users.colRole")}</label>
                 <select
                   value={formData.role}
                   onChange={(e) => setFormData({ ...formData, role: e.target.value as "admin" | "user" })}
                   style={inputStyle}
                 >
-                  <option value="user">普通用户</option>
-                  <option value="admin">管理员</option>
+                  <option value="user">{t("role.user")}</option>
+                  <option value="admin">{t("role.admin")}</option>
                 </select>
               </div>
               <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "6px" }}>
                 <button type="button" className="btn" style={{ border: "1px solid var(--border)" }} onClick={() => setShowModal(false)}>
-                  取消
+                  {t("users.cancel")}
                 </button>
                 <button type="submit" className="btn btn-primary">
-                  {editingUser ? "更新" : "创建"}
+                  {editingUser ? t("users.update") : t("users.create")}
                 </button>
               </div>
             </form>
