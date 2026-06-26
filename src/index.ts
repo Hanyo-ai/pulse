@@ -403,24 +403,35 @@ const app = new Elysia()
     return result;
   });
 
-// === Production: serve frontend + API directly via Elysia ===
+// === Production: serve built frontend (dist/) + API directly via Elysia ===
 if (isProduction) {
+  // Resolve dist relative to this file so cwd doesn't matter.
+  const distDir = new URL("../dist/", import.meta.url).pathname;
   app.get("*", async ({ set, path }) => {
-    const filePath = `./src${path}`;
+    // path is like "/index-abc.js" or "/"
+    const rel = path === "/" ? "/index.html" : path;
+    const filePath = distDir + rel.replace(/^\//, "");
     const file = Bun.file(filePath);
     if (await file.exists()) {
-      const ext = path.split(".").pop() || "";
+      const ext = rel.split(".").pop() || "";
       const mime: Record<string, string> = {
-        html: "text/html", css: "text/css", js: "application/javascript",
-        tsx: "application/javascript", ts: "application/javascript",
-        svg: "image/svg+xml", png: "image/png", ico: "image/x-icon",
+        html: "text/html; charset=utf-8",
+        css: "text/css",
+        js: "application/javascript",
+        map: "application/json",
+        svg: "image/svg+xml",
+        png: "image/png",
+        ico: "image/x-icon",
+        json: "application/json",
+        woff: "font/woff",
+        woff2: "font/woff2",
       };
       set.headers["Content-Type"] = mime[ext] || "application/octet-stream";
       return file;
     }
-    // SPA fallback
+    // SPA fallback for client-side routes
     set.headers["Content-Type"] = "text/html; charset=utf-8";
-    return Bun.file("./src/index.html");
+    return Bun.file(distDir + "index.html");
   });
   app.listen(PORT);
   console.log(`🚀 Pulse AI Gateway running on http://0.0.0.0:${PORT} (production)`);

@@ -1,4 +1,3 @@
 [install]
-# React 19 compatibility with Bun's bundler
-[define]
-"process.env.NODE_ENV" = "\"development\""
+# React 19 compatibility with Bun's bundler: only force NODE_ENV when bundling,
+# not at runtime (otherwise systemd's NODE_ENV=production is overridden).
