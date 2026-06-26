@@ -2,31 +2,30 @@
 
 # ⚡ PULSE
 
-**A lightweight AI Gateway for managing multiple AI providers**
+**One endpoint for every LLM. Stream, log, meter, bill.**
 
-Unified API gateway for OpenAI, Anthropic, and more — with real-time monitoring, audit logs, and cost tracking.
+A self-hosted AI gateway in a single Bun process — OpenAI- and Anthropic-compatible, with audit logs, live dashboards, and per-token cost tracking baked in.
 
 [![Powered by Bun](https://img.shields.io/badge/Powered%20by-Bun-black?logo=bun)](https://bun.sh)
 [![Built with Elysia](https://img.shields.io/badge/Built%20with-Elysia-blue)](https://elysiajs.com)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue?logo=typescript)](https://www.typescriptlang.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![React 19](https://img.shields.io/badge/React-19-61dafb?logo=react)](https://react.dev)
 
-[Features](#-features) · [Demo](#-demo) · [Quick Start](#-quick-start) · [API Docs](#-api-reference) · [Deploy](#-deployment)
+[Demo](#-demo) · [Quick Start](#-quick-start) · [API](#-api-reference) · [Deploy](#-deployment)
 
 </div>
 
 ---
 
-## ✨ Features
+## ✨ Why PULSE
 
-- 🎯 **Multi-Provider Gateway** — Unified interface for OpenAI, Anthropic, and custom endpoints
-- 🌊 **Streaming Support** — Full SSE streaming with real-time token forwarding
-- 📊 **Session Tracking** — Automatic conversation management with message history
-- 💰 **Cost Analytics** — Per-token pricing calculation across providers and models
-- 🔍 **Audit Logs** — Complete request logging with filtering and search
-- 📈 **Usage Statistics** — Visual dashboards for token consumption and trends
-- 🔐 **Authentication** — Secure API key management with bcrypt hashing
-- ⚡ **Fast & Lightweight** — Powered by Bun runtime with SQLite storage
+- 🎯 **Drop-in compatible** — OpenAI `/v1/chat/completions` and Anthropic `/v1/messages` work unchanged. Point your existing SDK at PULSE and you're done.
+- 🌊 **Real streaming** — Full SSE pass-through, token by token, no buffering.
+- 💰 **Cost tracking** — Per-model input / output / cache pricing, rolled up by session, model, and user.
+- 🔍 **Audit logs** — Every request searchable by provider, status, model, and time range.
+- 📊 **Live dashboard** — Sessions, usage trends, and model breakdowns in a React 19 UI.
+- 🔐 **Self-hosted auth** — bcrypt + JWT, single binary, zero external services.
+- ⚡ **Tiny stack** — Bun + SQLite + Elysia. Boots in milliseconds, one file to back up.
 
 ---
 
@@ -42,243 +41,95 @@ Unified API gateway for OpenAI, Anthropic, and more — with real-time monitorin
 
 ## 🚀 Quick Start
 
-### Prerequisites
-
-- [Bun](https://bun.sh) >= 1.0
-
-### Installation
+Requires [Bun](https://bun.sh) **>= 1.2**.
 
 ```bash
-# Clone the repository
 git clone <your-repo-url>
 cd pulse
-
-# Install dependencies
 bun install
-
-# Start development server with HMR
-bun dev
+bun run dev          # http://localhost:3000 (HMR)
 ```
 
-Visit `http://localhost:3000` and login with:
-- **Username:** `admin`
-- **Password:** `admin123`
+Login with **admin / admin123**, then change the password immediately.
 
-> ⚠️ Change the default password immediately after first login!
-
-### Production Build
+### Production
 
 ```bash
-# Build frontend bundle (outputs to ./dist)
-bun run build
-
-# Start production server (serves dist/ + API on PORT)
-bun start
+bun run build        # bundles frontend → ./dist
+bun run start        # serves dist/ + API on $PORT (default 3000)
 ```
 
-> ⚠️ `bun start` requires `dist/` to exist — always run `bun run build` first.
-> Re-run `bun run build` after any frontend change; the production branch
-> serves the bundled assets, not `src/`.
-
----
-
-## 🏗️ Architecture
-
-```
-┌─────────────┐
-│   Client    │
-│  (Your App) │
-└──────┬──────┘
-       │ POST /v1/chat/completions
-       │ Authorization: Bearer <gateway_key>
-       ↓
-┌──────────────────────────────────┐
-│         PULSE Gateway            │
-│  ┌────────────────────────────┐  │
-│  │  Auth & Key Validation     │  │
-│  └────────────────────────────┘  │
-│  ┌────────────────────────────┐  │
-│  │  Request Logging & Audit   │  │
-│  └────────────────────────────┘  │
-│  ┌────────────────────────────┐  │
-│  │  Provider Router           │  │
-│  └────────────────────────────┘  │
-└──────────┬───────────────────────┘
-           │
-    ┌──────┴──────┐
-    ↓             ↓
-┌─────────┐  ┌──────────┐
-│ OpenAI  │  │ Anthropic│
-└─────────┘  └──────────┘
-```
-
-### Tech Stack
-
-| Layer      | Technology                    |
-|------------|-------------------------------|
-| Runtime    | [Bun](https://bun.sh)        |
-| Framework  | [Elysia](https://elysiajs.com)|
-| Database   | SQLite (`bun:sqlite`)        |
-| Frontend   | React 19 + TypeScript        |
-| Auth       | bcrypt + JWT                 |
-
----
-
-## 📁 Project Structure
-
-```
-src/
-├── index.ts              # Main server entry (Elysia + Bun.serve)
-├── db.ts                 # Database schema & initialization
-├── types.ts              # TypeScript type definitions
-├── i18n.ts               # i18n strings
-│
-├── middleware/
-│   └── auth.ts           # JWT / session auth middleware
-│
-├── routes/
-│   ├── auth.ts           # Authentication & user management
-│   ├── sessions.ts       # Session management
-│   ├── logs.ts           # Audit log queries
-│   ├── endpoints.ts      # Provider endpoint CRUD
-│   └── usage.ts          # Usage statistics & analytics
-│
-├── components/
-│   ├── LoginPage.tsx     # Login/register UI
-│   ├── Sidebar.tsx       # Navigation sidebar
-│   ├── Topbar.tsx        # Header bar (user menu, etc.)
-│   ├── SessionMonitor.tsx# Real-time session dashboard
-│   ├── AuditLogs.tsx     # Request log viewer
-│   ├── Endpoints.tsx     # Provider management
-│   ├── Usage.tsx         # Analytics dashboard
-│   └── UserManagement.tsx# Admin user management
-│
-├── index.html            # Frontend entry point
-├── frontend.tsx          # React root
-├── App.tsx               # Main React component
-└── index.css             # Global styles
-
-bunfig.toml               # Bun config — see ⚠️ note in Configuration
-dist/                     # Built frontend (generated by `bun run build`)
-```
+> `bun run start` needs `dist/` to exist. Rebuild after any frontend change — the production branch serves the bundled assets, not `src/`.
 
 ---
 
 ## 🔌 API Reference
 
-### Gateway Proxy APIs (External)
+PULSE exposes two surfaces: **gateway proxies** for upstream LLM calls, and **management APIs** for the dashboard.
 
-Route external requests through PULSE using configured gateway keys.
+### Gateway proxy (external)
 
-#### OpenAI-Compatible
+OpenAI-compatible:
 
 ```bash
 POST /v1/chat/completions
 Authorization: Bearer <gateway_key>
 
 {
-  "model": "gpt-4",
+  "model": "gpt-4o",
   "messages": [{"role": "user", "content": "Hello!"}],
   "stream": true
 }
 ```
 
-#### Anthropic-Compatible
+Anthropic-compatible:
 
 ```bash
 POST /anthropic/v1/messages
 x-api-key: <gateway_key>
 
 {
-  "model": "claude-3-opus-20240229",
+  "model": "claude-sonnet-4-6",
   "messages": [{"role": "user", "content": "Hello!"}],
   "stream": true
 }
 ```
 
-### Management APIs (Internal)
-
-These APIs are used by the admin dashboard.
+### Management API (internal)
 
 <details>
-<summary><strong>Authentication & Users</strong></summary>
+<summary><strong>All endpoints</strong></summary>
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/auth/login` | Login and get user info |
-| POST | `/api/auth/logout` | Logout (invalidate session) |
-| POST | `/api/auth/register` | Register new user |
-| POST | `/api/auth/change-password` | Change current user's password |
-| GET  | `/api/auth/me` | Current user info |
-| GET  | `/api/auth/users` | List users (admin) |
-| POST | `/api/auth/users` | Create user (admin) |
-| PUT  | `/api/auth/users/:id` | Update user (admin) |
-| DELETE | `/api/auth/users/:id` | Delete user (admin) |
-
-</details>
-
-<details>
-<summary><strong>Sessions</strong></summary>
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/sessions` | List all sessions |
-| GET | `/api/sessions/:id` | Get session details |
-| GET | `/api/sessions/:id/messages` | Get session messages |
-| POST | `/api/sessions` | Create new session |
-| PUT | `/api/sessions/:id` | Update session |
-| DELETE | `/api/sessions/:id` | Delete session |
-
-</details>
-
-<details>
-<summary><strong>Endpoints</strong></summary>
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/endpoints` | List all provider endpoints |
-| GET | `/api/endpoints/:id` | Get endpoint details |
-| POST | `/api/endpoints` | Create endpoint |
-| PUT | `/api/endpoints/:id` | Update endpoint |
-| DELETE | `/api/endpoints/:id` | Delete endpoint |
+| POST | `/api/auth/login` · `logout` · `register` · `change-password` | Auth flow |
+| GET | `/api/auth/me` | Current user |
+| GET / POST / PUT / DELETE | `/api/auth/users[/:id]` | User management (admin) |
+| GET / POST / PUT / DELETE | `/api/sessions[/:id]` | Session CRUD |
+| GET | `/api/sessions/:id/messages` | Session messages |
+| GET / POST / PUT / DELETE | `/api/endpoints[/:id]` | Provider endpoint CRUD |
 | POST | `/api/endpoints/test` | Test an endpoint config without saving |
-
-</details>
-
-<details>
-<summary><strong>Audit Logs</strong></summary>
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/logs?provider=openai&status=200` | Query logs with filters |
-
-</details>
-
-<details>
-<summary><strong>Usage Analytics</strong></summary>
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/usage/stats` | Overall usage statistics |
-| GET | `/api/usage/by-model` | Usage grouped by model |
-| GET | `/api/usage/trend` | Historical usage trends |
-
-</details>
-
-<details>
-<summary><strong>Health Check</strong></summary>
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/health` | Service health status |
+| GET | `/api/logs?provider=…&status=…` | Query audit logs with filters |
+| GET | `/api/usage/stats` · `by-model` · `trend` | Usage analytics |
+| GET | `/api/health` | Service health |
 
 </details>
 
 ---
 
-## ⚙️ Configuration
+## 🏗️ Tech Stack
 
-### Environment Variables
+| Layer      | Technology                    |
+|------------|-------------------------------|
+| Runtime    | [Bun](https://bun.sh) 1.2+    |
+| Framework  | [Elysia](https://elysiajs.com)|
+| Database   | SQLite (`bun:sqlite`)         |
+| Frontend   | React 19 + TypeScript         |
+| Auth       | bcrypt + JWT                  |
+
+---
+
+## ⚙️ Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -286,219 +137,8 @@ These APIs are used by the admin dashboard.
 | `PORT` | `3000` | Server listening port |
 | `DB_PATH` | `pulse.db` | SQLite database file path |
 
-> ⚠️ **Do not put `process.env.NODE_ENV` in `bunfig.toml`'s `[define]` table.**
-> Bun applies `[define]` substitutions at **runtime** as well as bundling, so a
-> line like `"process.env.NODE_ENV" = "\"development\""` will silently override
-> `NODE_ENV=production` set by systemd / your shell, leaving the server in dev
-> mode (with HMR sidecar) even in production. If you need to force dev for
-> bundling only, pass `--define` on the `bun build` command line instead.
+Configure upstream providers in the dashboard's **Endpoints** tab: upstream URL, upstream API key, gateway key (what clients send), default model, and per-million-token pricing.
 
-### Endpoint Configuration
-
-Configure upstream AI providers in the admin dashboard under **Endpoints**:
-
-| Field | Description |
-|-------|-------------|
-| Provider Name | Display name for this endpoint |
-| Endpoint URL | Upstream API base URL |
-| API Key | Provider's API key (stored securely) |
-| Gateway Key | Key your clients use to access this endpoint |
-| Model Name | Default model identifier |
-| Pricing | Input/output/cache token prices (per million tokens) |
+> ⚠️ **Don't put `process.env.NODE_ENV` in `bunfig.toml`'s `[define]` table.** Bun applies `[define]` at runtime as well as during bundling, so a line like `"process.env.NODE_ENV" = "\"development\""` silently overrides `NODE_ENV=production` from systemd / your shell, leaving the server in dev mode. If you need to force dev for bundling only, pass `--define` on the `bun build` command line.
 
 ---
-
-## 🚀 Deployment
-
-### Option 1: systemd Service (Recommended)
-
-Assuming the repo is checked out at `/opt/pulse` and Bun is at `/usr/local/bin/bun`
-(adjust both to match your install — `which bun` to find the path).
-
-```bash
-# One-time setup: install deps and build the frontend bundle
-cd /opt/pulse
-bun install
-bun run build           # produces ./dist used by production mode
-chown -R www-data:www-data /opt/pulse
-mkdir -p /data/pulse
-chown www-data:www-data /data/pulse
-```
-
-Create `/etc/systemd/system/pulse.service`:
-
-```ini
-[Unit]
-Description=Pulse AI Gateway
-After=network.target
-
-[Service]
-Type=simple
-User=www-data
-WorkingDirectory=/opt/pulse
-Environment=NODE_ENV=production
-Environment=PORT=3000
-Environment=DB_PATH=/data/pulse/pulse.db
-# Rebuild on every start so frontend changes apply after a `systemctl restart`.
-# Remove this line if you build out-of-band in CI.
-ExecStartPre=/usr/local/bin/bun run build
-ExecStart=/usr/local/bin/bun run /opt/pulse/src/index.ts
-Restart=always
-RestartSec=5
-
-# Security hardening
-NoNewPrivileges=yes
-ProtectSystem=strict
-ProtectHome=yes
-ReadWritePaths=/data/pulse /opt/pulse/dist
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-systemctl daemon-reload
-systemctl enable --now pulse
-
-# Monitor logs — startup banner should read "🚀 ... (production)".
-# If you see "🔥 ... (dev + HMR)", NODE_ENV isn't reaching the runtime —
-# check bunfig.toml's [define] (see the warning under Configuration).
-journalctl -u pulse -f
-```
-
-> 💡 The Bun binary must live somewhere `ProtectHome=yes` doesn't block —
-> `/usr/local/bin/bun` is fine, `/root/.bun/bin/bun` is **not**.
-
-#### Current deployment (this repo)
-
-Live unit on this host. Paths differ from the generic example above:
-repo lives under `/data/jhq/pulse`, DB under `/data/pulse`.
-
-```ini
-# /etc/systemd/system/pulse.service
-[Unit]
-Description=Pulse AI Gateway
-After=network.target
-
-[Service]
-Type=simple
-User=www-data
-WorkingDirectory=/data/jhq/pulse
-Environment=NODE_ENV=production
-Environment=PORT=3000
-Environment=DB_PATH=/data/pulse/pulse.db
-ExecStart=/usr/local/bin/bun run /data/jhq/pulse/src/index.ts
-Restart=always
-RestartSec=5
-
-# Security hardening
-NoNewPrivileges=yes
-ProtectSystem=strict
-ProtectHome=yes
-ReadWritePaths=/data/pulse
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Notes specific to this deployment:
-- Caddy front-end at `/etc/caddy/Caddyfile` reverse-proxies `pulse.bryxen.ai → 127.0.0.1:3000`.
-- Cloudflare proxies the public DNS; origin TLS is handled by Caddy.
-- After editing frontend code, rebuild before restarting:
-  ```bash
-  cd /data/jhq/pulse && sudo -u www-data env HOME=/tmp bun run build
-  systemctl restart pulse
-  ```
-  `ExecStartPre` is intentionally **not** in this unit — builds run as an
-  explicit step so a transient build failure doesn't crashloop the service.
-
-### Reverse Proxy Setup
-
-#### Nginx
-
-```nginx
-server {
-    listen 443 ssl http2;
-    server_name pulse.your-domain.com;
-
-    ssl_certificate     /etc/letsencrypt/live/pulse.your-domain.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/pulse.your-domain.com/privkey.pem;
-
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # SSE streaming support
-    location ~ ^/(api|v1|anthropic)/ {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_buffering off;
-        proxy_cache off;
-        chunked_transfer_encoding on;
-    }
-}
-```
-
-#### Caddy (Simpler Alternative)
-
-```caddyfile
-pulse.your-domain.com {
-    reverse_proxy localhost:3000
-}
-```
-
-Caddy automatically handles HTTPS certificates.
-
----
-
-## 🔒 Security
-
-- 🔐 All passwords are hashed using bcrypt
-- 🛡️ API keys displayed with masking (first/last 4 chars only)
-- 📝 Complete audit trail of all requests
-- 🚫 No sensitive data logged in production
-- 🔑 Separate gateway keys per provider endpoint
-
-### Security Checklist
-
-- [ ] Change default admin password
-- [ ] Configure firewall rules (allow only HTTPS)
-- [ ] Enable systemd security features
-- [ ] Set up automated database backups
-- [ ] Monitor audit logs regularly
-- [ ] Rotate API keys periodically
-
----
-
-## 🗄️ Database
-
-PULSE uses SQLite with WAL mode for concurrent access:
-
-```bash
-# Backup database
-cp /data/pulse/pulse.db /backup/pulse_$(date +%Y%m%d).db
-
-# Automated daily backup (crontab)
-0 3 * * * cp /data/pulse/pulse.db /backup/pulse_$(date +\%Y\%m\%d).db
-```
-
-Database schema is automatically initialized on first run with a default admin user.
-
----
-
-## 📄 License
-
-Private / unlicensed. Not currently open to external contributions.
-
----
-
-<div align="center">
-
-**Built with ⚡ [Bun](https://bun.sh) and 💙 [Elysia](https://elysiajs.com)**
-
-</div>
