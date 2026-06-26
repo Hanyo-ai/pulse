@@ -37,6 +37,20 @@ export interface AssistantResponse {
   };
 }
 
+/** Anthropic-style content block (also used by some OpenAI multi-modal payloads) */
+export type ContentBlock =
+  | { type: "text"; text: string }
+  | { type: "thinking"; thinking: string }
+  | { type: "tool_use"; id?: string; name: string; input?: Record<string, unknown> }
+  | {
+      type: "tool_result";
+      tool_use_id?: string;
+      content: string | ContentBlock[];
+      is_error?: boolean;
+    }
+  | { type: "image"; source?: { media_type?: string; data?: string; url?: string } }
+  | { type: string;[k: string]: unknown };
+
 export interface RequestLog {
   id: number;
   request_id: string;

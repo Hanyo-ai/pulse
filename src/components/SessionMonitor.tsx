@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useTranslation } from "../i18n";
-import type { Session, Message, AssistantResponse } from "../types";
+import type { Session, Message, AssistantResponse, ContentBlock } from "../types";
 
 // ====================== SessionBar ======================
 interface SessionBarProps {
@@ -109,18 +109,105 @@ function SessionBar({ sessions, activeSessionId, onSelect }: SessionBarProps) {
   );
 }
 
-// ====================== ChatPanel ======================
-interface ChatPanelProps {
-  messages: Message[];
-  session: Session | null;
+// ====================== Content parsing ======================
+interface ParsedMessage {
+  /** Structured assistant payload (from finalizeSession). */
+  structured: AssistantResponse | null;
+  /** Plain or parsed content blocks for rendering. */
+  blocks: ContentBlock[];
+  /** Raw fallback text when nothing else can be derived. */
+  fallbackText: string;
 }
 
-function parseContent(content: string): AssistantResponse | null {
+function isContentBlock(v: unknown): v is ContentBlock {
+  return typeof v === "object" && v !== null && typeof (v as { type?: unknown }).type === "string";
+}
+
+function parseMessage(content: string, role: Message["role"]): ParsedMessage {
+  const fallback: ParsedMessage = { structured: null, blocks: [], fallbackText: content };
+
+  // 1) Try JSON
+  let parsed: unknown;
+  try { parsed = JSON.parse(content); } catch { return fallback; }
+
+  // 2) Structured assistant response (saved by finalizeSession)
+  if (
+    role === "assistant" &&
+    parsed && typeof parsed === "object" &&
+    typeof (parsed as { text?: unknown }).text === "string"
+  ) {
+    const ar = parsed as AssistantResponse;
+    const blocks: ContentBlock[] = [];
+    if (ar.thinking) blocks.push({ type: "thinking", thinking: ar.thinking });
+    if (ar.text) blocks.push({ type: "text", text: ar.text });
+    return { structured: ar, blocks, fallbackText: ar.text || "" };
+  }
+
+  // 3) Anthropic/OpenAI content-blocks array
+  if (Array.isArray(parsed) && parsed.every(isContentBlock)) {
+    return { structured: null, blocks: parsed as ContentBlock[], fallbackText: "" };
+  }
+
+  // 4) Single block object
+  if (isContentBlock(parsed)) {
+    return { structured: null, blocks: [parsed as ContentBlock], fallbackText: "" };
+  }
+
+  return fallback;
+}
+
+// ====================== Helpers ======================
+function formatJSON(v: unknown): string {
   try {
-    const parsed = JSON.parse(content);
-    if (parsed && typeof parsed.text === "string") return parsed as AssistantResponse;
-  } catch { /* not JSON, plain text */ }
-  return null;
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return String(v);
+  }
+}
+
+function previewToolInput(input: Record<string, unknown> | undefined): string {
+  if (!input || Object.keys(input).length === 0) return "";
+  const keys = Object.keys(input);
+  const head = keys.slice(0, 2).map((k) => {
+    const v = input[k];
+    const sv = typeof v === "string" ? v : JSON.stringify(v);
+    const trimmed = sv.length > 40 ? sv.slice(0, 40) + "…" : sv;
+    return `${k}=${trimmed}`;
+  });
+  return head.join(", ") + (keys.length > 2 ? ` +${keys.length - 2}` : "");
+}
+
+function flattenToolResult(content: string | ContentBlock[]): string {
+  if (typeof content === "string") return content;
+  return content
+    .map((b) => {
+      if (b.type === "text") return (b as { text: string }).text;
+      if (b.type === "image") return "[image]";
+      return formatJSON(b);
+    })
+    .join("\n");
+}
+
+// ====================== Renderers ======================
+function RichText({ text }: { text: string }) {
+  // Render fenced ```code``` blocks with code styling, leave the rest as plain text.
+  if (!text) return null;
+  const parts = text.split(/(```[\s\S]*?```)/g);
+  return (
+    <>
+      {parts.map((p, i) => {
+        if (p.startsWith("```") && p.endsWith("```")) {
+          const inner = p.slice(3, -3).replace(/^[a-zA-Z0-9_-]*\n?/, "");
+          return (
+            <pre key={i} className="msg-code">
+              <code>{inner}</code>
+            </pre>
+          );
+        }
+        return <span key={i}>{p}</span>;
+      })}
+    </>
+  );
 }
 
 function ThinkingBlock({ text }: { text: string }) {
@@ -137,7 +224,105 @@ function ThinkingBlock({ text }: { text: string }) {
   );
 }
 
-function UsageFooter({ usage, model, stopReason }: { usage?: AssistantResponse["usage"]; model?: string; stopReason?: string }) {
+function ToolUseCard({ block }: { block: Extract<ContentBlock, { type: "tool_use" }> }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const preview = previewToolInput(block.input);
+  return (
+    <div className="tool-card">
+      <button className="tool-card-header" onClick={() => setOpen(!open)}>
+        <span className="tool-card-icon">⚙</span>
+        <span className="tool-card-label">{t("session.toolCall")}</span>
+        <span className="tool-card-name">{block.name}</span>
+        {preview && <span className="tool-card-preview">{preview}</span>}
+        <span className="tool-card-arrow">{open ? "▾" : "▸"}</span>
+      </button>
+      {open && (
+        <div className="tool-card-body">
+          <div className="tool-card-section-label">{t("session.viewInput")}</div>
+          <pre className="tool-card-code">{formatJSON(block.input ?? {})}</pre>
+          {block.id && <div className="tool-card-id">id: {block.id}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ToolResultCard({ block }: { block: Extract<ContentBlock, { type: "tool_result" }> }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const flat = flattenToolResult(block.content);
+  const isError = !!block.is_error;
+  const preview = flat.replace(/\s+/g, " ").trim().slice(0, 80);
+  return (
+    <div className={`tool-card result${isError ? " error" : ""}`}>
+      <button className="tool-card-header" onClick={() => setOpen(!open)}>
+        <span className="tool-card-icon">{isError ? "✕" : "↩"}</span>
+        <span className="tool-card-label">
+          {isError ? t("session.toolError") : t("session.toolResult")}
+        </span>
+        {preview && <span className="tool-card-preview">{preview}{flat.length > 80 ? "…" : ""}</span>}
+        <span className="tool-card-arrow">{open ? "▾" : "▸"}</span>
+      </button>
+      {open && (
+        <div className="tool-card-body">
+          <pre className="tool-card-code">{flat}</pre>
+          {block.tool_use_id && <div className="tool-card-id">tool_use_id: {block.tool_use_id}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BlocksRenderer({ blocks }: { blocks: ContentBlock[] }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      {blocks.map((b, i) => {
+        switch (b.type) {
+          case "text": {
+            const text = (b as { text: string }).text;
+            if (!text) return null;
+            return (
+              <div key={i} className="msg-bubble">
+                <RichText text={text} />
+              </div>
+            );
+          }
+          case "thinking":
+            return <ThinkingBlock key={i} text={(b as { thinking: string }).thinking || ""} />;
+          case "tool_use":
+            return <ToolUseCard key={i} block={b as Extract<ContentBlock, { type: "tool_use" }>} />;
+          case "tool_result":
+            return <ToolResultCard key={i} block={b as Extract<ContentBlock, { type: "tool_result" }>} />;
+          case "image":
+            return (
+              <div key={i} className="msg-bubble msg-image-placeholder">
+                <span className="msg-image-icon">🖼</span> {t("session.image")}
+              </div>
+            );
+          default:
+            return (
+              <div key={i} className="msg-bubble">
+                <pre className="msg-code">{formatJSON(b)}</pre>
+              </div>
+            );
+        }
+      })}
+    </>
+  );
+}
+
+// ====================== UsageFooter ======================
+function UsageFooter({
+  usage,
+  model,
+  stopReason,
+}: {
+  usage?: AssistantResponse["usage"];
+  model?: string;
+  stopReason?: string;
+}) {
   const { t } = useTranslation();
   if (!usage && !model && !stopReason) return null;
   return (
@@ -145,19 +330,42 @@ function UsageFooter({ usage, model, stopReason }: { usage?: AssistantResponse["
       {model && <span className="msg-footer-item msg-model-badge">{model}</span>}
       {usage && (
         <>
-          <span className="msg-footer-item">{t("session.input")} {usage.input_tokens.toLocaleString()}</span>
-          <span className="msg-footer-item">{t("session.output")} {usage.output_tokens.toLocaleString()}</span>
+          <span className="msg-footer-item">
+            {t("session.input")} {usage.input_tokens.toLocaleString()}
+          </span>
+          <span className="msg-footer-item">
+            {t("session.output")} {usage.output_tokens.toLocaleString()}
+          </span>
           {(usage.cache_read_input_tokens ?? 0) > 0 && (
-            <span className="msg-footer-item msg-cache-hit">{t("session.cacheHit")} {usage.cache_read_input_tokens!.toLocaleString()}</span>
+            <span className="msg-footer-item msg-cache-hit">
+              {t("session.cacheHit")} {usage.cache_read_input_tokens!.toLocaleString()}
+            </span>
           )}
           {(usage.cache_creation_input_tokens ?? 0) > 0 && (
-            <span className="msg-footer-item msg-cache-miss">{t("session.cacheWrite")} {usage.cache_creation_input_tokens!.toLocaleString()}</span>
+            <span className="msg-footer-item msg-cache-miss">
+              {t("session.cacheWrite")} {usage.cache_creation_input_tokens!.toLocaleString()}
+            </span>
           )}
         </>
       )}
       {stopReason && <span className="msg-footer-item msg-stop-reason">{stopReason}</span>}
     </div>
   );
+}
+
+// ====================== ChatPanel ======================
+interface ChatPanelProps {
+  messages: Message[];
+  session: Session | null;
+}
+
+function formatTime(ts: string | undefined): string {
+  if (!ts) return "";
+  try {
+    return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  } catch {
+    return "";
+  }
 }
 
 function ChatPanel({ messages, session }: ChatPanelProps) {
@@ -168,10 +376,20 @@ function ChatPanel({ messages, session }: ChatPanelProps) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Pre-parse messages once per change
+  const parsed = useMemo(
+    () => messages.map((m) => ({ msg: m, parsed: parseMessage(m.content, m.role) })),
+    [messages]
+  );
+
   if (!session) {
     return (
       <div className="chat-panel">
-        <div className="chat-empty">{t("session.emptyHint1")}<br />{t("session.emptyHint2")}</div>
+        <div className="chat-empty">
+          {t("session.emptyHint1")}
+          <br />
+          {t("session.emptyHint2")}
+        </div>
       </div>
     );
   }
@@ -187,61 +405,75 @@ function ChatPanel({ messages, session }: ChatPanelProps) {
   const providerClass = session.provider === "OpenAI" ? "openai" : "anthropic";
   const providerAbbr = session.provider === "OpenAI" ? "OA" : "AN";
 
+  const roleAvatar = (role: Message["role"]) =>
+    role === "user" ? "U" : role === "assistant" ? providerAbbr : "SYS";
+  const roleAvatarClass = (role: Message["role"]) =>
+    role === "user" ? "user" : role === "assistant" ? `assistant ${providerClass}` : "system";
+  const roleLabel = (role: Message["role"]) =>
+    role === "user"
+      ? t("session.roleUser")
+      : role === "assistant"
+      ? t("session.roleAssistant")
+      : t("session.roleSystem");
+
   return (
     <div className="chat-panel">
       <div className="chat-messages">
-        {messages.map((msg) => {
+        {parsed.map(({ msg, parsed: p }) => {
           const isAssistant = msg.role === "assistant";
           const hasData = isAssistant && msg.tokens > 0;
-          const isBlocked = isAssistant && msg.tokens === 0;
-          const structured = isAssistant ? parseContent(msg.content) : null;
+          const isBlocked = isAssistant && msg.tokens === 0 && !p.structured && p.blocks.length === 0;
+          const blocks = p.blocks;
+          const fallback = p.fallbackText;
+          const time = formatTime(msg.created_at);
 
           return (
             <div key={msg.id} className={`msg-row ${msg.role}`}>
-              <div
-                className={`msg-avatar ${msg.role === "user" ? "user" : msg.role === "assistant" ? `assistant ${providerClass}` : "system"}`}
-              >
-                {msg.role === "user" ? "U" : msg.role === "assistant" ? providerAbbr : "SYS"}
-              </div>
-              <div>
-                {structured ? (
-                  <>
-                    {structured.thinking && <ThinkingBlock text={structured.thinking} />}
-                    <div className="msg-bubble">{structured.text}</div>
-                    <UsageFooter usage={structured.usage} model={structured.model} stopReason={structured.stop_reason} />
-                    <div className="msg-meta">
-                      <span className="msg-tokens">{msg.tokens} tokens</span>
-                      <span className="msg-latency">{msg.latency}</span>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="msg-bubble">{msg.content}</div>
-                    {hasData && (
-                      <div className="msg-meta">
-                        <span className="msg-tokens">{msg.tokens} tokens</span>
-                        <span className="msg-latency">{msg.latency}</span>
-                      </div>
-                    )}
-                  </>
+              <div className={`msg-avatar ${roleAvatarClass(msg.role)}`}>{roleAvatar(msg.role)}</div>
+              <div className="msg-body">
+                <div className="msg-headline">
+                  <span className="msg-role">{roleLabel(msg.role)}</span>
+                  {time && <span className="msg-time">{time}</span>}
+                </div>
+
+                {blocks.length > 0 ? (
+                  <BlocksRenderer blocks={blocks} />
+                ) : fallback ? (
+                  <div className="msg-bubble">
+                    <RichText text={fallback} />
+                  </div>
+                ) : null}
+
+                {p.structured && (
+                  <UsageFooter
+                    usage={p.structured.usage}
+                    model={p.structured.model}
+                    stopReason={p.structured.stop_reason}
+                  />
                 )}
-                {isBlocked && (
+
+                {(hasData || isBlocked) && (
                   <div className="msg-meta">
-                    <span className="msg-error">{t("session.blocked")}</span>
+                    {hasData && <span className="msg-tokens">{msg.tokens} tokens</span>}
+                    {hasData && <span className="msg-latency">{msg.latency}</span>}
+                    {isBlocked && <span className="msg-error">{t("session.blocked")}</span>}
                   </div>
                 )}
               </div>
             </div>
           );
         })}
+
         {session.status === "live" && (
           <div className="msg-row assistant">
             <div className={`msg-avatar assistant ${providerClass}`}>{providerAbbr}</div>
-            <div className="msg-bubble" style={{ padding: "10px 14px" }}>
-              <div className="typing-indicator">
-                <div className="dot" />
-                <div className="dot" />
-                <div className="dot" />
+            <div className="msg-body">
+              <div className="msg-bubble" style={{ padding: "10px 14px" }}>
+                <div className="typing-indicator">
+                  <div className="dot" />
+                  <div className="dot" />
+                  <div className="dot" />
+                </div>
               </div>
             </div>
           </div>
@@ -261,7 +493,12 @@ interface SessionMonitorProps {
   token: string;
 }
 
-export function SessionMonitor({ sessions, activeSessionId, onSelectSession, messages, token }: SessionMonitorProps) {
+export function SessionMonitor({
+  sessions,
+  activeSessionId,
+  onSelectSession,
+  messages,
+}: SessionMonitorProps) {
   const activeSession = sessions.find((s) => s.id === activeSessionId) || null;
 
   return (
