@@ -11,7 +11,7 @@ Unified API gateway for OpenAI, Anthropic, and more — with real-time monitorin
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![React 19](https://img.shields.io/badge/React-19-61dafb?logo=react)](https://react.dev)
 
-[Features](#-features) · [Quick Start](#-quick-start) · [API Docs](#-api-reference) · [Deploy](#-deployment)
+[Features](#-features) · [Demo](#-demo) · [Quick Start](#-quick-start) · [API Docs](#-api-reference) · [Deploy](#-deployment)
 
 </div>
 
@@ -27,6 +27,16 @@ Unified API gateway for OpenAI, Anthropic, and more — with real-time monitorin
 - 📈 **Usage Statistics** — Visual dashboards for token consumption and trends
 - 🔐 **Authentication** — Secure API key management with bcrypt hashing
 - ⚡ **Fast & Lightweight** — Powered by Bun runtime with SQLite storage
+
+---
+
+## 🎬 Demo
+
+<div align="center">
+
+![PULSE demo](./assets/demo.gif)
+
+</div>
 
 ---
 
