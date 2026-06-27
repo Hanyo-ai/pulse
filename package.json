@@ -5,13 +5,13 @@
   "private": false,
   "type": "module",
   "license": "MIT",
-  "homepage": "https://github.com/sylvor-ai/pulse#readme",
+  "homepage": "https://github.com/Bryxen-ai/pulse#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/sylvor-ai/pulse.git"
+    "url": "git+https://github.com/Bryxen-ai/pulse.git"
   },
   "bugs": {
-    "url": "https://github.com/sylvor-ai/pulse/issues"
+    "url": "https://github.com/Bryxen-ai/pulse/issues"
   },
   "keywords": [
     "ai",
@@ -26,7 +26,7 @@
     "cli"
   ],
   "bin": {
-    "pulse": "./bin/pulse.mjs"
+    "pulse": "./bin/pulse"
   },
   "files": [
     "bin",
