@@ -128,4 +128,20 @@ export const sessionsRoutes = new Elysia({ prefix: "/api/sessions" })
     return db
       .query("SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC")
       .all(id);
+  })
+  .post("/cleanup-stale", ({ headers }) => {
+    const result = requireAuth(headers["authorization"] ?? null);
+    if (result instanceof Response) return result;
+
+    const db = getDb();
+    // Mark sessions as idle if they've been live for more than 5 minutes
+    const staleResult = db.run(
+      "UPDATE sessions SET status = 'idle' WHERE status = 'live' AND updated_at < datetime('now', '-5 minutes')"
+    );
+
+    return {
+      success: true,
+      cleaned: staleResult.changes,
+      message: `Cleaned up ${staleResult.changes} stale session(s)`
+    };
   });

@@ -1206,6 +1206,64 @@ tr:last-child td {
   overflow-y: auto;
 }
 
+/* ---- System message block ---- */
+.msg-system-block {
+  margin-bottom: 6px;
+}
+
+.msg-system-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: 1px solid oklch(85% 0.04 280);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  font-size: 11px;
+  color: oklch(48% 0.1 280);
+  cursor: pointer;
+  font-family: var(--font);
+  width: 100%;
+  text-align: left;
+}
+
+.msg-system-header:hover {
+  background: oklch(96% 0.02 280);
+}
+
+.msg-system-arrow {
+  font-size: 10px;
+  width: 12px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.msg-system-preview {
+  flex: 1;
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-left: 8px;
+}
+
+.msg-system-content {
+  margin-top: 4px;
+  padding: 10px 12px;
+  background: oklch(98% 0.01 280);
+  border: 1px solid oklch(90% 0.02 280);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  line-height: 1.65;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.msg-system-content .msg-markdown {
+  color: oklch(28% 0.015 270);
+}
+
 /* ---- Usage footer ---- */
 .msg-footer {
   display: flex;

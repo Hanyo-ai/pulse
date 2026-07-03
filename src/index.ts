@@ -67,7 +67,7 @@ function logRequest(
 
 interface BodyMessage { role: string; content: unknown }
 
-function getOrCreateSession(provider: string, model: string, messages: BodyMessage[], existingSessionId?: string): string {
+function getOrCreateSession(provider: string, model: string, messages: BodyMessage[], systemPrompt: string | undefined, existingSessionId?: string): string {
   const db = getDb();
 
   // If a session ID is provided, verify it exists and append messages
@@ -135,6 +135,12 @@ function getOrCreateSession(provider: string, model: string, messages: BodyMessa
   const title = firstUserText.slice(0, 60) + (firstUserText.length > 60 ? "…" : "");
   db.run("INSERT INTO sessions (id, title, provider, model, status) VALUES (?, ?, ?, ?, 'live')",
     [id, title || "New Session", provider, model]);
+
+  // Save system prompt as first message if provided
+  if (systemPrompt) {
+    db.run("INSERT INTO messages (session_id, role, content, tokens, latency) VALUES (?, 'system', ?, 0, '—')", [id, systemPrompt]);
+  }
+
   for (const m of messages) {
     const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
     db.run("INSERT INTO messages (session_id, role, content, tokens, latency) VALUES (?, ?, ?, 0, '—')", [id, m.role, text]);
@@ -169,8 +175,9 @@ async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: 
   const start = Date.now();
   const isStream = !!body.stream;
   const reqMessages = (body.messages as BodyMessage[] | undefined) || [];
+  const systemPrompt = body.system as string | undefined;
   const existingSessionId = request.headers.get("x-session-id") || undefined;
-  const sessionId = getOrCreateSession(ep.provider_name || baseUrl, model, reqMessages, existingSessionId);
+  const sessionId = getOrCreateSession(ep.provider_name || baseUrl, model, reqMessages, systemPrompt, existingSessionId);
 
   // Add session ID to response headers
   set.headers["X-Session-Id"] = sessionId;
@@ -293,8 +300,9 @@ async function proxyAnthropic(gatewayKey: string, request: Request, set: { statu
   const start = Date.now();
   const isStream = !!body.stream;
   const reqMessages = (body.messages as BodyMessage[] | undefined) || [];
+  const systemPrompt = body.system as string | undefined;
   const existingSessionId = request.headers.get("x-session-id") || undefined;
-  const sessionId = getOrCreateSession(ep.provider_name || baseUrl, model, reqMessages, existingSessionId);
+  const sessionId = getOrCreateSession(ep.provider_name || baseUrl, model, reqMessages, systemPrompt, existingSessionId);
 
   // Add session ID to response headers
   set.headers["X-Session-Id"] = sessionId;

@@ -221,6 +221,22 @@ function ThinkingBlock({ text }: { text: string }) {
   );
 }
 
+function SystemBlock({ text }: { text: string }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const preview = text.slice(0, 100);
+  return (
+    <div className="msg-system-block">
+      <button className="msg-system-header" onClick={() => setOpen(!open)}>
+        <span className="msg-system-arrow">{open ? "▾" : "▸"}</span>
+        <span>{t("session.system")}</span>
+        {!open && <span className="msg-system-preview">{preview}{text.length > 100 ? "…" : ""}</span>}
+      </button>
+      {open && <div className="msg-system-content"><RichText text={text} /></div>}
+    </div>
+  );
+}
+
 function ToolUseCard({ block }: { block: Extract<ContentBlock, { type: "tool_use" }> }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -271,7 +287,7 @@ function ToolResultCard({ block }: { block: Extract<ContentBlock, { type: "tool_
   );
 }
 
-function BlocksRenderer({ blocks }: { blocks: ContentBlock[] }) {
+function BlocksRenderer({ blocks, role }: { blocks: ContentBlock[]; role?: Message["role"] }) {
   const { t } = useTranslation();
   return (
     <>
@@ -280,6 +296,10 @@ function BlocksRenderer({ blocks }: { blocks: ContentBlock[] }) {
           case "text": {
             const text = (b as { text: string }).text;
             if (!text) return null;
+            // Render system messages in collapsible block
+            if (role === "system") {
+              return <SystemBlock key={i} text={text} />;
+            }
             return <RichText key={i} text={text} />;
           }
           case "thinking":
@@ -449,9 +469,9 @@ function ChatPanel({ messages, session }: ChatPanelProps) {
                 </div>
 
                 {blocks.length > 0 ? (
-                  <BlocksRenderer blocks={blocks} />
+                  <BlocksRenderer blocks={blocks} role={msg.role} />
                 ) : fallback ? (
-                  <RichText text={fallback} />
+                  msg.role === "system" ? <SystemBlock text={fallback} /> : <RichText text={fallback} />
                 ) : null}
 
                 {p.structured && (

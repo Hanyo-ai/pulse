@@ -69,6 +69,8 @@ export function App() {
   const initialFetchDone = useRef(false);
   // Keep a ref so the polling closure can read the latest activeSessionId
   const activeSessionIdRef = useRef<string>("");
+  // Track if user manually selected a session (to prevent auto-switching)
+  const userSelectedSession = useRef(false);
 
   // Poll sessions every 3 seconds
   useEffect(() => {
@@ -93,8 +95,8 @@ export function App() {
             setActiveSessionId(target.id);
             activeSessionIdRef.current = target.id;
             initialFetchDone.current = true;
-          } else if (initialFetchDone.current) {
-            // Auto-follow: if a live session appears that isn't currently selected, switch to it
+          } else if (initialFetchDone.current && !userSelectedSession.current) {
+            // Auto-follow: only switch to new live sessions if user hasn't made a manual selection
             const live = data.find((s) => s.status === "live");
             if (live && live.id !== activeSessionIdRef.current) {
               setActiveSessionId(live.id);
@@ -115,6 +117,7 @@ export function App() {
     if (!token) {
       initialFetchDone.current = false;
       activeSessionIdRef.current = "";
+      userSelectedSession.current = false;
     }
   }, [token]);
 
@@ -140,6 +143,7 @@ export function App() {
   const handleSelectSession = (id: string) => {
     setActiveSessionId(id);
     activeSessionIdRef.current = id;
+    userSelectedSession.current = true; // Mark that user made a manual selection
     fetchMessages(id);
   };
 
