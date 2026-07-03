@@ -21,6 +21,17 @@ interface EndpointRow {
   price_cache_input_per_m: number;
 }
 
+function normalizeSystem(system: unknown): string | undefined {
+  if (typeof system === "string") return system;
+  if (Array.isArray(system)) {
+    return (system as Array<{ type: string; text?: string }>)
+      .filter(b => b.type === "text")
+      .map(b => b.text ?? "")
+      .join("\n") || undefined;
+  }
+  return undefined;
+}
+
 function lookupEndpoint(gatewayKey: string): EndpointRow | null {
   if (!gatewayKey) return null;
   const db = getDb();
@@ -175,7 +186,7 @@ async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: 
   const start = Date.now();
   const isStream = !!body.stream;
   const reqMessages = (body.messages as BodyMessage[] | undefined) || [];
-  const systemPrompt = body.system as string | undefined;
+  const systemPrompt = normalizeSystem(body.system);
   const existingSessionId = request.headers.get("x-session-id") || undefined;
   const sessionId = getOrCreateSession(ep.provider_name || baseUrl, model, reqMessages, systemPrompt, existingSessionId);
 
@@ -300,7 +311,7 @@ async function proxyAnthropic(gatewayKey: string, request: Request, set: { statu
   const start = Date.now();
   const isStream = !!body.stream;
   const reqMessages = (body.messages as BodyMessage[] | undefined) || [];
-  const systemPrompt = body.system as string | undefined;
+  const systemPrompt = normalizeSystem(body.system);
   const existingSessionId = request.headers.get("x-session-id") || undefined;
   const sessionId = getOrCreateSession(ep.provider_name || baseUrl, model, reqMessages, systemPrompt, existingSessionId);
 
