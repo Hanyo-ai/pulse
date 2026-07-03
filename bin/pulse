@@ -134,12 +134,14 @@ switch (cmd) {
     // 1. Fetch latest version from npm registry
     let latest: string;
     try {
-      const res = await fetch(`https://registry.npmjs.org/${pkgName}/latest`);
+      const res = await fetch(`https://registry.npmjs.org/${pkgName}/latest`, {
+        signal: AbortSignal.timeout(10_000),
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as { version: string };
       latest = data.version;
     } catch (e) {
-      console.error("pulse: failed to check latest version");
+      console.error("pulse: failed to check latest version", e instanceof Error ? e.message : e);
       process.exit(1);
     }
 

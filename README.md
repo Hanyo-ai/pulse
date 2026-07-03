@@ -2,30 +2,18 @@
 
 # ⚡ PULSE
 
-**One endpoint for every LLM. Stream, log, meter, bill.**
+**See inside every AI agent. Real-time session visualization, debugging & observability.**
 
-A self-hosted AI gateway in a single Bun process — OpenAI- and Anthropic-compatible, with audit logs, live dashboards, and per-token cost tracking baked in.
+Watch agent conversations unfold live — `system` prompts, `user` messages, `assistant` responses, `tool_result` returns — elegantly visualized in a single dashboard. A self-hosted AI gateway powered by Bun, OpenAI & Anthropic compatible, with cost tracking and audit logs built in.
 
 [![Powered by Bun](https://img.shields.io/badge/Powered%20by-Bun-black?logo=bun)](https://bun.sh)
 [![Built with Elysia](https://img.shields.io/badge/Built%20with-Elysia-blue)](https://elysiajs.com)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![React 19](https://img.shields.io/badge/React-19-61dafb?logo=react)](https://react.dev)
 
-[Demo](#-demo) · [Quick Start](#-quick-start) · [API](#-api-reference) · [Deploy](#-deployment)
+[中文](./README.zh-CN.md) · [Demo](#-demo) · [Quick Start](#-quick-start) · [API](#-api-reference) · [Deploy](#-deployment)
 
 </div>
-
----
-
-## ✨ Why PULSE
-
-- 🎯 **Drop-in compatible** — OpenAI `/v1/chat/completions` and Anthropic `/v1/messages` work unchanged. Point your existing SDK at PULSE and you're done.
-- 🌊 **Real streaming** — Full SSE pass-through, token by token, no buffering.
-- 💰 **Cost tracking** — Per-model input / output / cache pricing, rolled up by session, model, and user.
-- 🔍 **Audit logs** — Every request searchable by provider, status, model, and time range.
-- 📊 **Live dashboard** — Sessions, usage trends, and model breakdowns in a React 19 UI.
-- 🔐 **Self-hosted auth** — bcrypt + JWT, single binary, zero external services.
-- ⚡ **Tiny stack** — Bun + SQLite + Elysia. Boots in milliseconds, one file to back up.
 
 ---
 
@@ -36,6 +24,10 @@ A self-hosted AI gateway in a single Bun process — OpenAI- and Anthropic-compa
 ![PULSE demo](./assets/demo.gif)
 
 </div>
+
+---
+
+## ✨ Why PULSE
 
 ---
 
