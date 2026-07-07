@@ -527,10 +527,166 @@ function TestPanel({ ep }: { ep: Endpoint }) {
   );
 }
 
+interface EditModalProps {
+  endpoint: Endpoint;
+  onClose: () => void;
+  onSaved: () => void;
+  token: string;
+}
+
+function EditModal({ endpoint, onClose, onSaved, token }: EditModalProps) {
+  const { t } = useTranslation();
+  const [displayName, setDisplayName] = useState(endpoint.display_name || "");
+  const [providerName, setProviderName] = useState(endpoint.provider_name || "");
+  const [providerKey, setProviderKey] = useState(endpoint.provider_key || "");
+  const [endpointUrl, setEndpointUrl] = useState(endpoint.endpoint_url || "");
+  const [modelName, setModelName] = useState(endpoint.model_name || "");
+  const [apiKey, setApiKey] = useState("");
+  const [priceInputPerM, setPriceInputPerM] = useState(String(endpoint.price_input_per_m ?? ""));
+  const [priceOutputPerM, setPriceOutputPerM] = useState(String(endpoint.price_output_per_m ?? ""));
+  const [priceCacheInputPerM, setPriceCacheInputPerM] = useState(String(endpoint.price_cache_input_per_m ?? ""));
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const payload: Record<string, unknown> = {
+        display_name: displayName,
+        provider_name: providerName,
+        provider_key: providerKey,
+        endpoint_url: endpointUrl,
+        model_name: modelName,
+        price_input_per_m: priceInputPerM ? parseFloat(priceInputPerM) : 0,
+        price_output_per_m: priceOutputPerM ? parseFloat(priceOutputPerM) : 0,
+        price_cache_input_per_m: priceCacheInputPerM ? parseFloat(priceCacheInputPerM) : 0,
+      };
+      // Only send api_key when the admin entered a new value.
+      if (apiKey) payload.api_key = apiKey;
+
+      const res = await fetch(`/api/endpoints/${endpoint.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setError(d.error || t("ep.updateFailed"));
+        return;
+      }
+      onSaved();
+      onClose();
+    } catch {
+      setError(t("ep.networkError"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        zIndex: 500,
+      }}
+      onClick={onClose}
+    >
+      <div
+        className="card"
+        style={{ width: "520px", maxWidth: "92%", maxHeight: "90vh", overflowY: "auto" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "20px" }}>
+          <h3 style={{ fontSize: "15px", fontWeight: 650 }}>{t("ep.editEndpoint")}</h3>
+          <button
+            onClick={onClose}
+            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: "18px", lineHeight: 1 }}
+          >
+            ×
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+          {error && (
+            <div style={{ padding: "8px 12px", borderRadius: "var(--radius-sm)", background: "oklch(95% 0.04 25)", color: "var(--red)", fontSize: "13px" }}>
+              {error}
+            </div>
+          )}
+
+          <div>
+            <label style={labelStyle}>{t("ep.customName")}</label>
+            <input type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)} required style={inputStyle} />
+          </div>
+
+          <div style={{ display: "flex", gap: "10px" }}>
+            <div style={{ flex: 2 }}>
+              <label style={labelStyle}>{t("ep.providerName")}</label>
+              <input type="text" value={providerName} onChange={(e) => setProviderName(e.target.value)} required style={inputStyle} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>{t("ep.providerKeyId")}</label>
+              <input type="text" value={providerKey} onChange={(e) => setProviderKey(e.target.value.toUpperCase().slice(0, 3))} required style={inputStyle} />
+            </div>
+          </div>
+
+          <div>
+            <label style={labelStyle}>Base URL *</label>
+            <input type="url" value={endpointUrl} onChange={(e) => setEndpointUrl(e.target.value)} required style={inputStyle} />
+          </div>
+
+          <div>
+            <label style={labelStyle}>API Key <span style={{ fontWeight: 400 }}>{t("ep.apiKeyEditHint")}</span></label>
+            <input type="password" placeholder={endpoint.api_key_masked || "sk-..."} value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={inputStyle} />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Model *</label>
+            <input type="text" value={modelName} onChange={(e) => setModelName(e.target.value)} required style={inputStyle} />
+          </div>
+
+          <div style={{ padding: "12px", borderRadius: "var(--radius-sm)", background: "oklch(97% 0.01 250)", border: "1px solid var(--border)" }}>
+            <div style={{ fontSize: "12px", fontWeight: 650, marginBottom: "8px", color: "var(--fg)" }}>{t("ep.pricingConfig")}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+              <div>
+                <label style={labelStyle}>{t("ep.priceInput")}</label>
+                <input type="number" step="0.000001" placeholder="0.00" value={priceInputPerM} onChange={(e) => setPriceInputPerM(e.target.value)} style={inputStyle} />
+              </div>
+              <div>
+                <label style={labelStyle}>{t("ep.priceOutput")}</label>
+                <input type="number" step="0.000001" placeholder="0.00" value={priceOutputPerM} onChange={(e) => setPriceOutputPerM(e.target.value)} style={inputStyle} />
+              </div>
+              <div>
+                <label style={labelStyle}>{t("ep.priceCacheInput")}</label>
+                <input type="number" step="0.000001" placeholder="0.00" value={priceCacheInputPerM} onChange={(e) => setPriceCacheInputPerM(e.target.value)} style={inputStyle} />
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "4px" }}>
+            <button type="button" className="btn" style={{ border: "1px solid var(--border)" }} onClick={onClose}>
+              {t("ep.cancel")}
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={loading}>
+              {loading ? t("ep.saving") : t("ep.save")}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export function Endpoints({ token }: { token: string }) {
   const { t } = useTranslation();
   const [endpoints, setEndpoints] = useState<Endpoint[]>([]);
   const [showModal, setShowModal] = useState(false);
+  const [editing, setEditing] = useState<Endpoint | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
   const fetchEndpoints = () => {
@@ -559,6 +715,22 @@ export function Endpoints({ token }: { token: string }) {
       body: JSON.stringify({ enabled: newEnabled }),
     });
     fetchEndpoints();
+  };
+
+  const handleDelete = async (ep: Endpoint) => {
+    const name = ep.display_name || ep.provider_name;
+    if (!confirm(t("ep.deleteConfirm", { name }))) return;
+    const res = await fetch(`/api/endpoints/${ep.id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.ok) {
+      if (expandedId === ep.id) setExpandedId(null);
+      fetchEndpoints();
+    } else {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || t("ep.deleteFailed"));
+    }
   };
 
   const providerColor = (key: string) => {
@@ -595,12 +767,13 @@ export function Endpoints({ token }: { token: string }) {
               <th>{t("ep.colErrorRate")}</th>
               <th>{t("ep.colEnabled")}</th>
               <th style={{ width: "40px" }}></th>
+              <th style={{ width: "150px" }}>{t("ep.colActions")}</th>
             </tr>
           </thead>
           <tbody>
             {endpoints.length === 0 ? (
               <tr>
-                <td colSpan={9} style={{ textAlign: "center", color: "var(--muted)", padding: "24px" }}>{t("ep.noEndpoints")}</td>
+                <td colSpan={10} style={{ textAlign: "center", color: "var(--muted)", padding: "24px" }}>{t("ep.noEndpoints")}</td>
               </tr>
             ) : endpoints.map((ep) => (
               <Fragment key={ep.id}>
@@ -686,10 +859,28 @@ export function Endpoints({ token }: { token: string }) {
                     {t("ep.testBtn")}
                   </button>
                 </td>
+                <td>
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    <button
+                      className="btn btn-sm"
+                      style={{ fontSize: "11px", padding: "4px 10px", border: "1px solid var(--border)" }}
+                      onClick={() => setEditing(ep)}
+                    >
+                      {t("ep.edit")}
+                    </button>
+                    <button
+                      className="btn btn-sm"
+                      style={{ fontSize: "11px", padding: "4px 10px", color: "var(--red)", borderColor: "var(--red)" }}
+                      onClick={() => handleDelete(ep)}
+                    >
+                      {t("ep.delete")}
+                    </button>
+                  </div>
+                </td>
               </tr>
               {expandedId === ep.id && (
                 <tr key={`${ep.id}-test`}>
-                  <td colSpan={9} style={{ padding: "0 8px 12px" }}>
+                  <td colSpan={10} style={{ padding: "0 8px 12px" }}>
                     <TestPanel ep={ep} />
                   </td>
                 </tr>
@@ -702,6 +893,15 @@ export function Endpoints({ token }: { token: string }) {
 
       {showModal && (
         <AddModal onClose={() => setShowModal(false)} onCreated={fetchEndpoints} token={token} />
+      )}
+
+      {editing && (
+        <EditModal
+          endpoint={editing}
+          onClose={() => setEditing(null)}
+          onSaved={fetchEndpoints}
+          token={token}
+        />
       )}
     </section>
   );

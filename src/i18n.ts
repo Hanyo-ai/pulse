@@ -159,6 +159,15 @@ const dict: Record<Lang, Record<string, string>> = {
     "ep.statusUnhealthy": "Unhealthy",
     "ep.testBtn": "🧪 Test",
     "ep.copyCurl": "📋 Copy curl",
+    "ep.colActions": "Actions",
+    "ep.edit": "Edit",
+    "ep.delete": "Delete",
+    "ep.deleteConfirm": "Delete endpoint \"{name}\"? This cannot be undone.",
+    "ep.deleteFailed": "Failed to delete",
+    "ep.updateFailed": "Failed to update",
+    "ep.save": "Save",
+    "ep.saving": "Saving…",
+    "ep.apiKeyEditHint": "(leave blank to keep unchanged)",
 
     // UserManagement
     "users.title": "Manage system users & permissions",
@@ -365,6 +374,15 @@ const dict: Record<Lang, Record<string, string>> = {
     "ep.statusUnhealthy": "异常",
     "ep.testBtn": "🧪 测试",
     "ep.copyCurl": "📋 复制 curl",
+    "ep.colActions": "操作",
+    "ep.edit": "编辑",
+    "ep.delete": "删除",
+    "ep.deleteConfirm": "确定删除 endpoint \"{name}\"？此操作不可撤销。",
+    "ep.deleteFailed": "删除失败",
+    "ep.updateFailed": "更新失败",
+    "ep.save": "保存",
+    "ep.saving": "保存中…",
+    "ep.apiKeyEditHint": "（留空则保持不变）",
 
     // UserManagement
     "users.title": "管理系统用户与权限",
