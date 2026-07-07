@@ -38,7 +38,7 @@ Requires [Bun](https://bun.sh) **>= 1.2**.
 ### Install from npm (single-user / local)
 
 ```bash
-bun install -g @bryxen/pulse
+bun install -g @hanyo_ai/pulse
 pulse run
 ```
 

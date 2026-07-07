@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// PULSE CLI entry — invoked as `pulse <cmd>` after `bun install -g @bryxen-ai/pulse`.
+// PULSE CLI entry — invoked as `pulse <cmd>` after `bun install -g @hanyo_ai/pulse`.
 // Thin shim that prepares env vars and hands control to src/index.ts.
 
 import { parseArgs } from "node:util";
@@ -128,7 +128,7 @@ switch (cmd) {
     break;
 
   case "update": {
-    const pkgName = "@bryxen/pulse";
+    const pkgName = "@hanyo_ai/pulse";
     console.log("pulse: checking for updates…");
 
     // 1. Fetch latest version from npm registry

@@ -38,7 +38,7 @@
 ### 从 npm 安装（单用户/本地）
 
 ```bash
-bun install -g @bryxen/pulse
+bun install -g @hanyo_ai/pulse
 pulse run
 ```
 

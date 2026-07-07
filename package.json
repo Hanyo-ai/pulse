@@ -1,17 +1,17 @@
 {
-  "name": "@bryxen/pulse",
-  "version": "0.1.7",
+  "name": "@hanyo_ai/pulse",
+  "version": "0.1.8",
   "description": "Self-hosted AI gateway — OpenAI- and Anthropic-compatible, with audit logs, live dashboards, and per-token cost tracking. Powered by Bun.",
   "private": false,
   "type": "module",
   "license": "MIT",
-  "homepage": "https://github.com/Bryxen-ai/pulse#readme",
+  "homepage": "https://github.com/hanyo-ai/pulse#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Bryxen-ai/pulse.git"
+    "url": "git+https://github.com/hanyo-ai/pulse.git"
   },
   "bugs": {
-    "url": "https://github.com/Bryxen-ai/pulse/issues"
+    "url": "https://github.com/hanyo-ai/pulse/issues"
   },
   "keywords": [
     "ai",

@@ -53,7 +53,7 @@ export function Topbar({ activeSection, onNavigate, onToggleSidebar, activeSessi
       <div style={{ flex: 1 }} />
       <div className="metrics-strip">
         <a
-          href="https://github.com/Bryxen-ai/pulse"
+          href="https://github.com/hanyo-ai/pulse"
           target="_blank"
           rel="noopener noreferrer"
           className="github-link"
