@@ -145,6 +145,7 @@ function parseMessage(content: string, role: Message["role"]): ParsedMessage {
     const blocks: ContentBlock[] = [];
     if (ar.thinking) blocks.push({ type: "thinking", thinking: ar.thinking });
     if (ar.text) blocks.push({ type: "text", text: ar.text });
+    if (ar.tool_calls) blocks.push(...ar.tool_calls);
     return { structured: ar, blocks, fallbackText: ar.text || "" };
   }
 

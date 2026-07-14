@@ -140,6 +140,14 @@ function initSchema(db: Database) {
     }
   }
 
+  // Migration: scope sessions to the endpoint (gateway key) that created them,
+  // so conversation-continuity matching never crosses endpoint/tenant boundaries.
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN endpoint_id INTEGER");
+  } catch {
+    // column already exists, ignore
+  }
+
   // Migration: add cache columns to request_logs if they don't exist
   const logColumns = [
     { name: "prompt_cache_hit_tokens", def: "INTEGER DEFAULT 0" },

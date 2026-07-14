@@ -12,6 +12,7 @@ getDb();
 
 // Gateway proxy helpers
 interface EndpointRow {
+  id: number;
   endpoint_url: string;
   api_key: string;
   model_name: string;
@@ -36,7 +37,7 @@ function lookupEndpoint(gatewayKey: string): EndpointRow | null {
   if (!gatewayKey) return null;
   const db = getDb();
   return db.query(
-    "SELECT endpoint_url, api_key, model_name, provider_name, price_input_per_m, price_output_per_m, price_cache_input_per_m FROM endpoints WHERE gateway_key = ? AND enabled = 1"
+    "SELECT id, endpoint_url, api_key, model_name, provider_name, price_input_per_m, price_output_per_m, price_cache_input_per_m FROM endpoints WHERE gateway_key = ? AND enabled = 1"
   ).get(gatewayKey) as EndpointRow | null;
 }
 
@@ -76,20 +77,56 @@ function logRequest(
   );
 }
 
-interface BodyMessage { role: string; content: unknown }
+interface BodyMessage {
+  role: string;
+  content: unknown;
+  tool_calls?: Array<{ id?: string; type?: string; function?: { name?: string; arguments?: string } }>;
+  tool_call_id?: string;
+}
 
-function getOrCreateSession(provider: string, model: string, messages: BodyMessage[], systemPrompt: string | undefined, existingSessionId?: string): string {
+// Normalize a client-sent message into the (role, content-json) shape we persist.
+// Handles two OpenAI-style cases that don't map 1:1 onto our stored schema:
+//  - assistant messages with content:null + tool_calls[] (the model called a tool, no text)
+//  - tool-result messages (role "tool"/"function") echoing a tool's output back to the model
+function serializeIncomingMessage(m: BodyMessage): { role: string; text: string } {
+  if (m.role === "tool" || m.role === "function") {
+    const resultText = typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? "");
+    const block = { type: "tool_result", tool_use_id: m.tool_call_id, content: resultText };
+    return { role: "tool_result", text: JSON.stringify(block) };
+  }
+
+  if (m.role === "assistant" && (m.content === null || m.content === undefined) && m.tool_calls?.length) {
+    const toolCalls = m.tool_calls.map((tc) => {
+      let input: Record<string, unknown> | undefined;
+      try { input = tc.function?.arguments ? JSON.parse(tc.function.arguments) : undefined; } catch { input = { raw: tc.function?.arguments }; }
+      return { id: tc.id, name: tc.function?.name || "", input };
+    });
+    return { role: "assistant", text: JSON.stringify({ text: "", tool_calls: toolCalls }) };
+  }
+
+  const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+  return { role: m.role, text };
+}
+
+function getOrCreateSession(endpointId: number, provider: string, model: string, messages: BodyMessage[], systemPrompt: string | undefined, existingSessionId?: string): string {
   const db = getDb();
 
-  // If a session ID is provided, verify it exists and append messages
+  const insertMessages = (sessionId: string, msgs: BodyMessage[]) => {
+    for (const m of msgs) {
+      const { role, text } = serializeIncomingMessage(m);
+      db.run("INSERT INTO messages (session_id, role, content, tokens, latency) VALUES (?, ?, ?, 0, '—')", [sessionId, role, text]);
+    }
+  };
+
+  // If a session ID is provided, verify it exists, belongs to this endpoint, and append messages
   if (existingSessionId) {
-    const existing = db.query("SELECT id, status FROM sessions WHERE id = ?").get(existingSessionId) as { id: string; status: string } | null;
+    const existing = db.query("SELECT id FROM sessions WHERE id = ? AND endpoint_id = ?").get(existingSessionId, endpointId) as { id: string } | null;
     if (existing) {
-      db.run("UPDATE sessions SET status = 'live', updated_at = datetime('now') WHERE id = ?", [existingSessionId]);
-      for (const m of messages) {
-        const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
-        db.run("INSERT INTO messages (session_id, role, content, tokens, latency) VALUES (?, ?, ?, 0, '—')", [existingSessionId, m.role, text]);
-      }
+      const run = db.transaction(() => {
+        db.run("UPDATE sessions SET status = 'live', updated_at = datetime('now') WHERE id = ?", [existingSessionId]);
+        insertMessages(existingSessionId, messages);
+      });
+      run();
       return existingSessionId;
     }
   }
@@ -102,71 +139,95 @@ function getOrCreateSession(provider: string, model: string, messages: BodyMessa
   const firstUserText = typeof firstUser?.content === "string" ? firstUser.content : JSON.stringify(firstUser?.content || "");
 
   if (messages.length > 1) {
-    // Look for recent sessions (within 2 hours) with the same provider/model and matching first user message
+    // Look for recent sessions (within 2 hours) on this same endpoint with matching provider/model/title.
+    // Scoping by endpoint_id prevents unrelated tenants/API keys from ever being matched together,
+    // and wrapping the match+append in a transaction prevents concurrent requests from double-appending.
     const titlePrefix = firstUserText.slice(0, 60);
-    const candidates = db.query(
-      `SELECT id FROM sessions WHERE provider = ? AND model = ? AND title = ? AND updated_at >= datetime('now', '-2 hours') ORDER BY updated_at DESC LIMIT 5`
-    ).all(provider, model, titlePrefix + (firstUserText.length > 60 ? "…" : "")) as { id: string }[];
+    const title = titlePrefix + (firstUserText.length > 60 ? "…" : "");
 
-    for (const candidate of candidates) {
-      // Get stored messages for this candidate session
-      const stored = db.query(
-        "SELECT role, content FROM messages WHERE session_id = ? AND role IN ('user','assistant') ORDER BY id ASC"
-      ).all(candidate.id) as { role: string; content: string }[];
+    const matchAndAppend = db.transaction(() => {
+      const candidates = db.query(
+        `SELECT id FROM sessions WHERE endpoint_id = ? AND provider = ? AND model = ? AND title = ? AND updated_at >= datetime('now', '-2 hours') ORDER BY updated_at DESC LIMIT 5`
+      ).all(endpointId, provider, model, title) as { id: string }[];
 
-      if (stored.length === 0) continue;
+      for (const candidate of candidates) {
+        // Get stored messages for this candidate session
+        const stored = db.query(
+          "SELECT role, content FROM messages WHERE session_id = ? AND role IN ('user','assistant') ORDER BY id ASC"
+        ).all(candidate.id) as { role: string; content: string }[];
 
-      // Check if incoming messages contain all stored messages as a prefix
-      // (the client re-sends the full conversation each time)
-      let matches = true;
-      for (let i = 0; i < stored.length && i < messages.length; i++) {
-        const incomingText = typeof messages[i]!.content === "string"
-          ? messages[i]!.content
-          : JSON.stringify(messages[i]!.content);
-        // Assistant messages are stored as JSON (finalizeSession), compare role only for assistant
-        if (messages[i]!.role !== stored[i]!.role) { matches = false; break; }
-        if (stored[i]!.role === "user" && incomingText !== stored[i]!.content) { matches = false; break; }
-      }
+        if (stored.length === 0) continue;
 
-      if (matches && messages.length > stored.length) {
-        // Reuse this session — append only the new messages beyond what's already stored
-        db.run("UPDATE sessions SET status = 'live', updated_at = datetime('now') WHERE id = ?", [candidate.id]);
-        const newMessages = messages.slice(stored.length);
-        for (const m of newMessages) {
-          const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
-          db.run("INSERT INTO messages (session_id, role, content, tokens, latency) VALUES (?, ?, ?, 0, '—')", [candidate.id, m.role, text]);
+        // Compare against only the user/assistant messages in the incoming array, in order,
+        // so tool/tool_result messages interleaved in the conversation don't throw off alignment.
+        const incomingUA = messages.filter((m) => m.role === "user" || m.role === "assistant");
+
+        // Check if incoming messages contain all stored messages as a prefix
+        // (the client re-sends the full conversation each time)
+        let matches = true;
+        for (let i = 0; i < stored.length && i < incomingUA.length; i++) {
+          const incomingText = typeof incomingUA[i]!.content === "string"
+            ? incomingUA[i]!.content
+            : JSON.stringify(incomingUA[i]!.content);
+          // Assistant messages are stored as JSON (finalizeSession), compare role only for assistant
+          if (incomingUA[i]!.role !== stored[i]!.role) { matches = false; break; }
+          if (stored[i]!.role === "user" && incomingText !== stored[i]!.content) { matches = false; break; }
         }
-        return candidate.id;
+
+        if (matches && incomingUA.length > stored.length) {
+          // Reuse this session — append only the new messages beyond what's already stored.
+          // Walk the original (unfiltered) messages array and skip the leading run that
+          // corresponds to the already-stored user/assistant messages, so interleaved
+          // tool/tool_result messages in the new tail are still appended.
+          let uaSeen = 0;
+          let cutoff = 0;
+          for (; cutoff < messages.length && uaSeen < stored.length; cutoff++) {
+            const r = messages[cutoff]!.role;
+            if (r === "user" || r === "assistant") uaSeen++;
+          }
+          db.run("UPDATE sessions SET status = 'live', updated_at = datetime('now') WHERE id = ?", [candidate.id]);
+          insertMessages(candidate.id, messages.slice(cutoff));
+          return candidate.id;
+        }
       }
-    }
+      return null;
+    });
+
+    const reusedId = matchAndAppend();
+    if (reusedId) return reusedId;
   }
 
   // Create new session
-  const id = `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  const id = `sess_${crypto.randomUUID()}`;
   const title = firstUserText.slice(0, 60) + (firstUserText.length > 60 ? "…" : "");
-  db.run("INSERT INTO sessions (id, title, provider, model, status) VALUES (?, ?, ?, ?, 'live')",
-    [id, title || "New Session", provider, model]);
+  const createNew = db.transaction(() => {
+    db.run("INSERT INTO sessions (id, title, provider, model, status, endpoint_id) VALUES (?, ?, ?, ?, 'live', ?)",
+      [id, title || "New Session", provider, model, endpointId]);
 
-  // Save system prompt as first message if provided
-  if (systemPrompt) {
-    db.run("INSERT INTO messages (session_id, role, content, tokens, latency) VALUES (?, 'system', ?, 0, '—')", [id, systemPrompt]);
-  }
+    // Save system prompt as first message if provided
+    if (systemPrompt) {
+      db.run("INSERT INTO messages (session_id, role, content, tokens, latency) VALUES (?, 'system', ?, 0, '—')", [id, systemPrompt]);
+    }
 
-  for (const m of messages) {
-    const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
-    db.run("INSERT INTO messages (session_id, role, content, tokens, latency) VALUES (?, ?, ?, 0, '—')", [id, m.role, text]);
-  }
+    insertMessages(id, messages);
+  });
+  createNew();
   return id;
 }
 
+interface ToolCallInfo { id?: string; name: string; input?: Record<string, unknown> }
+
 function finalizeSession(
   sessionId: string,
-  response: { text: string; thinking?: string; model?: string; stop_reason?: string; usage?: Record<string, number> },
+  response: { text: string; thinking?: string; model?: string; stop_reason?: string; usage?: Record<string, number>; tool_calls?: ToolCallInfo[] },
   totalTokens: number,
   latencyMs: number
 ) {
   const db = getDb();
-  const content = JSON.stringify(response);
+  const payload = response.tool_calls?.length
+    ? { ...response, tool_calls: response.tool_calls.map((tc) => ({ type: "tool_use" as const, id: tc.id, name: tc.name, input: tc.input })) }
+    : response;
+  const content = JSON.stringify(payload);
   db.run("INSERT INTO messages (session_id, role, content, tokens, latency) VALUES (?, 'assistant', ?, ?, ?)",
     [sessionId, content, totalTokens, `${latencyMs}ms`]);
   db.run("UPDATE sessions SET status = 'idle', tokens = ?, latency = ?, updated_at = datetime('now') WHERE id = ?",
@@ -188,7 +249,7 @@ async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: 
   const reqMessages = (body.messages as BodyMessage[] | undefined) || [];
   const systemPrompt = normalizeSystem(body.system);
   const existingSessionId = request.headers.get("x-session-id") || undefined;
-  const sessionId = getOrCreateSession(ep.provider_name || baseUrl, model, reqMessages, systemPrompt, existingSessionId);
+  const sessionId = getOrCreateSession(ep.id, ep.provider_name || baseUrl, model, reqMessages, systemPrompt, existingSessionId);
 
   // Add session ID to response headers
   set.headers["X-Session-Id"] = sessionId;
@@ -211,6 +272,7 @@ async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: 
           const reader = upstreamBody.getReader();
           let buffer = "";
           let assistantText = "";
+          let thinkingText = "";
           try {
             while (true) {
               const { done, value } = await reader.read();
@@ -222,6 +284,7 @@ async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: 
             let usage: UsageInfo = { inputTokens: 0, outputTokens: 0, cacheHitTokens: 0, cacheMissTokens: 0 };
             let responseModel = "";
             let stopReason = "";
+            const toolCallsByIndex = new Map<number, { id?: string; name: string; args: string }>();
             for (const line of buffer.split("\n")) {
               if (line.startsWith("data: ") && !line.includes("[DONE]")) {
                 try {
@@ -238,16 +301,37 @@ async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: 
                   if (j.choices?.[0]?.finish_reason) stopReason = j.choices[0].finish_reason;
                   const delta = j.choices?.[0]?.delta?.content;
                   if (delta) assistantText += delta;
+                  // DeepSeek/OpenAI-compatible reasoning models stream chain-of-thought as reasoning_content
+                  const reasoningDelta = j.choices?.[0]?.delta?.reasoning_content;
+                  if (reasoningDelta) thinkingText += reasoningDelta;
+                  const toolDeltas = j.choices?.[0]?.delta?.tool_calls as
+                    Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }> | undefined;
+                  if (toolDeltas) {
+                    for (const td of toolDeltas) {
+                      const existing = toolCallsByIndex.get(td.index) || { id: td.id, name: "", args: "" };
+                      if (td.id) existing.id = td.id;
+                      if (td.function?.name) existing.name += td.function.name;
+                      if (td.function?.arguments) existing.args += td.function.arguments;
+                      toolCallsByIndex.set(td.index, existing);
+                    }
+                  }
                 } catch { /* */ }
               }
             }
+            const toolCalls: ToolCallInfo[] = [...toolCallsByIndex.values()].map((tc) => {
+              let input: Record<string, unknown> | undefined;
+              try { input = tc.args ? JSON.parse(tc.args) : undefined; } catch { input = { raw: tc.args }; }
+              return { id: tc.id, name: tc.name, input };
+            });
             const cost = calcCost(ep, usage);
             const totalTokens = usage.inputTokens + usage.outputTokens;
             logRequest(ep.provider_name, model, upstream.status, Date.now() - start, usage, cost, sessionId, buffer, JSON.stringify(body));
             finalizeSession(sessionId, {
               text: assistantText,
+              thinking: thinkingText || undefined,
               model: responseModel || (model as string),
               stop_reason: stopReason,
+              tool_calls: toolCalls.length ? toolCalls : undefined,
               usage: { input_tokens: usage.inputTokens, output_tokens: usage.outputTokens, cache_read_input_tokens: usage.cacheHitTokens, cache_creation_input_tokens: usage.cacheMissTokens },
             }, totalTokens, Date.now() - start);
           } finally {
@@ -264,8 +348,10 @@ async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: 
 
     let usage: UsageInfo = { inputTokens: 0, outputTokens: 0, cacheHitTokens: 0, cacheMissTokens: 0 };
     let assistantText = "";
+    let thinkingText = "";
     let responseModel = "";
     let stopReason = "";
+    let toolCalls: ToolCallInfo[] = [];
     try {
       const j = JSON.parse(text);
       usage = {
@@ -274,9 +360,20 @@ async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: 
         cacheHitTokens: j.usage?.prompt_cache_hit_tokens || 0,
         cacheMissTokens: j.usage?.prompt_cache_miss_tokens || 0,
       };
-      assistantText = j.choices?.[0]?.message?.content || text;
+      assistantText = j.choices?.[0]?.message?.content || "";
+      thinkingText = j.choices?.[0]?.message?.reasoning_content || "";
       responseModel = j.model || "";
       stopReason = j.choices?.[0]?.finish_reason || "";
+      const rawToolCalls = j.choices?.[0]?.message?.tool_calls as
+        Array<{ id?: string; function?: { name?: string; arguments?: string } }> | undefined;
+      if (rawToolCalls) {
+        toolCalls = rawToolCalls.map((tc) => {
+          let input: Record<string, unknown> | undefined;
+          try { input = tc.function?.arguments ? JSON.parse(tc.function.arguments) : undefined; } catch { input = { raw: tc.function?.arguments }; }
+          return { id: tc.id, name: tc.function?.name || "", input };
+        });
+      }
+      if (!assistantText && !toolCalls.length) assistantText = text;
     } catch { /* */ }
 
     const cost = calcCost(ep, usage);
@@ -284,8 +381,10 @@ async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: 
     logRequest(ep.provider_name, model, upstream.status, latencyMs, usage, cost, sessionId, text, JSON.stringify(body));
     finalizeSession(sessionId, {
       text: assistantText,
+      thinking: thinkingText || undefined,
       model: responseModel || (model as string),
       stop_reason: stopReason,
+      tool_calls: toolCalls.length ? toolCalls : undefined,
       usage: { input_tokens: usage.inputTokens, output_tokens: usage.outputTokens, cache_read_input_tokens: usage.cacheHitTokens, cache_creation_input_tokens: usage.cacheMissTokens },
     }, totalTokens, latencyMs);
 
@@ -313,7 +412,7 @@ async function proxyAnthropic(gatewayKey: string, request: Request, set: { statu
   const reqMessages = (body.messages as BodyMessage[] | undefined) || [];
   const systemPrompt = normalizeSystem(body.system);
   const existingSessionId = request.headers.get("x-session-id") || undefined;
-  const sessionId = getOrCreateSession(ep.provider_name || baseUrl, model, reqMessages, systemPrompt, existingSessionId);
+  const sessionId = getOrCreateSession(ep.id, ep.provider_name || baseUrl, model, reqMessages, systemPrompt, existingSessionId);
 
   // Add session ID to response headers
   set.headers["X-Session-Id"] = sessionId;
@@ -352,6 +451,7 @@ async function proxyAnthropic(gatewayKey: string, request: Request, set: { statu
             let thinkingText = "";
             let responseModel = "";
             let stopReason = "";
+            const toolBlocksByIndex = new Map<number, { id?: string; name: string; jsonInput: string }>();
             for (const line of buffer.split("\n")) {
               if (line.startsWith("data: ")) {
                 try {
@@ -370,15 +470,27 @@ async function proxyAnthropic(gatewayKey: string, request: Request, set: { statu
                   if (j.type === "message_delta" && j.delta?.stop_reason) {
                     stopReason = j.delta.stop_reason;
                   }
+                  if (j.type === "content_block_start" && j.content_block?.type === "tool_use") {
+                    toolBlocksByIndex.set(j.index, { id: j.content_block.id, name: j.content_block.name, jsonInput: "" });
+                  }
                   if (j.type === "content_block_delta" && j.delta?.text) {
                     assistantText += j.delta.text;
                   }
                   if (j.type === "content_block_delta" && j.delta?.thinking) {
                     thinkingText += j.delta.thinking;
                   }
+                  if (j.type === "content_block_delta" && j.delta?.type === "input_json_delta") {
+                    const existing = toolBlocksByIndex.get(j.index);
+                    if (existing) existing.jsonInput += j.delta.partial_json || "";
+                  }
                 } catch { /* */ }
               }
             }
+            const toolCalls: ToolCallInfo[] = [...toolBlocksByIndex.values()].map((tb) => {
+              let input: Record<string, unknown> | undefined;
+              try { input = tb.jsonInput ? JSON.parse(tb.jsonInput) : undefined; } catch { input = { raw: tb.jsonInput }; }
+              return { id: tb.id, name: tb.name, input };
+            });
             const cost = calcCost(ep, usage);
             const totalTokens = usage.inputTokens + usage.outputTokens;
             logRequest(ep.provider_name, model, upstream.status, Date.now() - start, usage, cost, sessionId, buffer, JSON.stringify(body));
@@ -387,6 +499,7 @@ async function proxyAnthropic(gatewayKey: string, request: Request, set: { statu
               thinking: thinkingText || undefined,
               model: responseModel || (model as string),
               stop_reason: stopReason,
+              tool_calls: toolCalls.length ? toolCalls : undefined,
               usage: { input_tokens: usage.inputTokens, output_tokens: usage.outputTokens, cache_read_input_tokens: usage.cacheHitTokens, cache_creation_input_tokens: usage.cacheMissTokens },
             }, totalTokens, Date.now() - start);
           } finally {
@@ -406,6 +519,7 @@ async function proxyAnthropic(gatewayKey: string, request: Request, set: { statu
     let thinkingText = "";
     let responseModel = "";
     let stopReason = "";
+    let toolCalls: ToolCallInfo[] = [];
     try {
       const j = JSON.parse(text);
       usage = {
@@ -414,15 +528,16 @@ async function proxyAnthropic(gatewayKey: string, request: Request, set: { statu
         cacheHitTokens: j.usage?.prompt_cache_hit_tokens || 0,
         cacheMissTokens: j.usage?.prompt_cache_miss_tokens || 0,
       };
-      // Anthropic content is an array of blocks: [{type:"text",text:"..."}, {type:"thinking",thinking:"..."}]
-      const blocks = j.content as Array<{ type: string; text?: string; thinking?: string }> | undefined;
+      // Anthropic content is an array of blocks: [{type:"text",...}, {type:"thinking",...}, {type:"tool_use",...}]
+      const blocks = j.content as Array<{ type: string; text?: string; thinking?: string; id?: string; name?: string; input?: Record<string, unknown> }> | undefined;
       if (blocks) {
         for (const b of blocks) {
           if (b.type === "text" && b.text) assistantText += b.text;
           if (b.type === "thinking" && b.thinking) thinkingText += b.thinking;
+          if (b.type === "tool_use") toolCalls.push({ id: b.id, name: b.name || "", input: b.input });
         }
       }
-      if (!assistantText) assistantText = text;
+      if (!assistantText && !toolCalls.length) assistantText = text;
       responseModel = j.model || "";
       stopReason = j.stop_reason || "";
     } catch { /* */ }
@@ -435,6 +550,7 @@ async function proxyAnthropic(gatewayKey: string, request: Request, set: { statu
       thinking: thinkingText || undefined,
       model: responseModel || (model as string),
       stop_reason: stopReason,
+      tool_calls: toolCalls.length ? toolCalls : undefined,
       usage: { input_tokens: usage.inputTokens, output_tokens: usage.outputTokens, cache_read_input_tokens: usage.cacheHitTokens, cache_creation_input_tokens: usage.cacheMissTokens },
     }, totalTokens, latencyMs);
 

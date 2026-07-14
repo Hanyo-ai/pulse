@@ -54,7 +54,7 @@ export const sessionsRoutes = new Elysia({ prefix: "/api/sessions" })
 
     const db = getDb();
     const { title, provider, model } = body as { title: string; provider: string; model: string };
-    const id = `sess_${Date.now().toString(36)}`;
+    const id = `sess_${crypto.randomUUID()}`;
     db.run(
       "INSERT INTO sessions (id, title, provider, model, user_id) VALUES (?, ?, ?, ?, ?)",
       [id, title, provider, model, result.user.id]

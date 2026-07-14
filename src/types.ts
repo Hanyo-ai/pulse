@@ -28,6 +28,8 @@ export interface AssistantResponse {
   thinking?: string;
   model?: string;
   stop_reason?: string;
+  /** tool_use blocks the model emitted in this turn, if any */
+  tool_calls?: ToolUseBlock[];
   usage?: {
     input_tokens: number;
     output_tokens: number;
@@ -37,11 +39,13 @@ export interface AssistantResponse {
   };
 }
 
+export type ToolUseBlock = { type: "tool_use"; id?: string; name: string; input?: Record<string, unknown> };
+
 /** Anthropic-style content block (also used by some OpenAI multi-modal payloads) */
 export type ContentBlock =
   | { type: "text"; text: string }
   | { type: "thinking"; thinking: string }
-  | { type: "tool_use"; id?: string; name: string; input?: Record<string, unknown> }
+  | ToolUseBlock
   | {
       type: "tool_result";
       tool_use_id?: string;
