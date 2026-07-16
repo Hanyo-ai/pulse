@@ -604,6 +604,68 @@ const app = new Elysia()
     set.status = proxySet.status;
     Object.assign(set.headers, proxySet.headers);
     return result;
+  })
+  // GET /v1/models - List available models
+  .get("/v1/models", ({ request, set }) => {
+    const gatewayKey = request.headers.get("x-api-key") || "";
+    const ep = lookupEndpoint(gatewayKey);
+    if (!ep) {
+      set.status = 401;
+      return { error: "Invalid or disabled API key" };
+    }
+    // Return the model configured for this endpoint
+    return {
+      data: [{
+        id: ep.model_name,
+        type: "model",
+        created_at: "2024-01-01T00:00:00Z",
+        display_name: ep.model_name,
+      }],
+      has_more: false,
+      first_id: ep.model_name,
+      last_id: ep.model_name,
+    };
+  })
+  // POST /anthropic/v1/messages/count_tokens - Count tokens in a message
+  .post("/anthropic/v1/messages/count_tokens", async ({ request, set }) => {
+    const gatewayKey = request.headers.get("x-api-key") || "";
+    const ep = lookupEndpoint(gatewayKey);
+    if (!ep) {
+      set.status = 401;
+      return { error: "Invalid or disabled API key" };
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json() as Record<string, unknown>;
+    } catch {
+      set.status = 400;
+      return { error: "Invalid JSON body" };
+    }
+
+    const baseUrl = ep.endpoint_url.replace(/\/+$/, "");
+    const model = (body.model || ep.model_name) as string;
+
+    try {
+      // Proxy to upstream count_tokens endpoint
+      const upstream = await fetch(`${baseUrl}/messages/count_tokens`, {
+        method: "POST",
+        headers: {
+          "x-api-key": ep.api_key,
+          "anthropic-version": request.headers.get("anthropic-version") || "2023-06-01",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ...body, model }),
+      });
+
+      const text = await upstream.text();
+      set.status = upstream.status;
+      set.headers["Content-Type"] = "application/json";
+      return text;
+    } catch (err: unknown) {
+      set.status = 502;
+      return { error: `Upstream error: ${err instanceof Error ? err.message : String(err)}` };
+    }
   });
 
 // === Production: serve built frontend (dist/) + API directly via Elysia ===
