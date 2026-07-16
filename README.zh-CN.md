@@ -153,3 +153,33 @@ x-api-key: <gateway_key>
 > ⚠️ **不要在 `bunfig.toml` 的 `[define]` 表中放入 `process.env.NODE_ENV`。** Bun 在运行时和打包时都会应用 `[define]`，所以像 `"process.env.NODE_ENV" = "\"development\""` 这行会在 systemd/shell 设置 `NODE_ENV=production` 时静默覆盖它，导致服务器处于开发模式。如果只需要在打包时强制使用开发模式，请在 `bun build` 命令行中传入 `--define`。
 
 ---
+
+## 🔗 接入 Claude Code
+
+将 PULSE 作为 Claude Code 的 Anthropic 后端 — 所有 Agent 会话、工具调用和响应都会自动出现在 PULSE 仪表盘中。
+
+### 一键配置
+
+```bash
+bash scripts/env-deploy.sh "http://127.0.0.1:3000/anthropic" "你的网关密钥"
+```
+
+该脚本将：
+- 根据传参设置 `ANTHROPIC_BASE_URL` 和 `ANTHROPIC_API_KEY`
+- 将环境变量写入你的 Shell 配置文件（`~/.zshrc`、`~/.bashrc` 等）
+- 更新 `~/.claude.json` 以白名单化 API 密钥
+
+运行后，重启终端或执行 `source ~/.zshrc`（或你对应 Shell 的配置文件），然后启动 `claude` — 所有请求将通过 PULSE 代理。
+
+> 将 `"你的网关密钥"` 替换为在 PULSE **端点**选项卡中配置的网关密钥。
+
+### 手动配置
+
+```bash
+export ANTHROPIC_BASE_URL="http://127.0.0.1:3000/anthropic"
+export ANTHROPIC_API_KEY="你的网关密钥"
+```
+
+> ⚠️ 启动 Claude Code 前请确保 PULSE 正在运行（`bun run dev` 或 `pulse run`）。在 PULSE 仪表盘的**端点**选项卡中配置你的网关密钥和上游 Anthropic 端点。
+
+---

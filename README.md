@@ -153,3 +153,33 @@ Configure upstream providers in the dashboard's **Endpoints** tab: upstream URL,
 > ⚠️ **Don't put `process.env.NODE_ENV` in `bunfig.toml`'s `[define]` table.** Bun applies `[define]` at runtime as well as during bundling, so a line like `"process.env.NODE_ENV" = "\"development\""` silently overrides `NODE_ENV=production` from systemd / your shell, leaving the server in dev mode. If you need to force dev for bundling only, pass `--define` on the `bun build` command line.
 
 ---
+
+## 🔗 Connect Claude Code
+
+Use PULSE as the Anthropic backend for Claude Code — all agent sessions, tool calls, and responses will appear in your PULSE dashboard automatically.
+
+### One-command setup
+
+```bash
+bash scripts/env-deploy.sh "http://127.0.0.1:3000/anthropic" "your-gateway-key"
+```
+
+This script will:
+- Set `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` from your arguments
+- Write the environment variables to your shell config (`~/.zshrc`, `~/.bashrc`, etc.)
+- Update `~/.claude.json` to whitelist the API key
+
+After running, restart your terminal or run `source ~/.zshrc` (or your shell's config), then start `claude` — everything will be proxied through PULSE.
+
+> Replace `"your-gateway-key"` with the gateway key you configured in PULSE's **Endpoints** tab.
+
+### Manual setup
+
+```bash
+export ANTHROPIC_BASE_URL="http://127.0.0.1:3000/anthropic"
+export ANTHROPIC_API_KEY="your-gateway-key"
+```
+
+> ⚠️ Make sure PULSE is running (`bun run dev` or `pulse run`) before launching Claude Code. Configure your gateway key and upstream Anthropic endpoint in the PULSE dashboard's **Endpoints** tab.
+
+---
