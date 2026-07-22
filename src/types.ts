@@ -7,6 +7,8 @@ export interface Session {
   tokens: number;
   latency: string;
   cost: string;
+  cache_hit_tokens: number;
+  cache_miss_tokens: number;
   user_id?: number;
   created_at?: string;
   updated_at?: string;

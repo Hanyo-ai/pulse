@@ -1748,6 +1748,7 @@ tr:last-child td {
   max-height: 88vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .log-modal-header {
@@ -1783,7 +1784,6 @@ tr:last-child td {
 }
 
 .log-modal-body {
-  flex: 1;
   overflow: auto;
   padding: 14px;
   background: var(--surface-2);
@@ -1793,19 +1793,29 @@ tr:last-child td {
   line-height: 1.6;
   font-family: var(--font-mono);
   white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 360px;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  max-height: clamp(160px, 30vh, 360px);
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .log-modal-body code {
   font-family: var(--font-mono);
   color: var(--fg);
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+  white-space: pre-wrap;
 }
 
 .log-modal-sections {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .log-modal-section-label {

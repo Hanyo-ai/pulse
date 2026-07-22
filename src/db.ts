@@ -161,6 +161,19 @@ function initSchema(db: Database) {
     }
   }
 
+  // Migration: add cache columns to sessions for per-session cache hit rate
+  const sessCacheCols = [
+    { name: "cache_hit_tokens", def: "INTEGER DEFAULT 0" },
+    { name: "cache_miss_tokens", def: "INTEGER DEFAULT 0" },
+  ];
+  for (const col of sessCacheCols) {
+    try {
+      db.run(`ALTER TABLE sessions ADD COLUMN ${col.name} ${col.def}`);
+    } catch {
+      // column already exists, ignore
+    }
+  }
+
   // Migration: add models JSON array to endpoints (multi-model support)
   try {
     db.run("ALTER TABLE endpoints ADD COLUMN models TEXT DEFAULT '[]'");

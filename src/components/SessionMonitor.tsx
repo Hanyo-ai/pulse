@@ -102,6 +102,18 @@ function SessionBar({ sessions, activeSessionId, onSelect }: SessionBarProps) {
           <div className="ss-lbl">Tokens</div>
         </div>
         <div className="ss-item">
+          <div className="ss-val">
+            {(() => {
+              if (!active) return "—";
+              const hit = active.cache_hit_tokens || 0;
+              const miss = active.cache_miss_tokens || 0;
+              const total = hit + miss;
+              return total > 0 ? `${Math.round((hit / total) * 100)}%` : "—";
+            })()}
+          </div>
+          <div className="ss-lbl">{t("session.cacheHitRate")}</div>
+        </div>
+        <div className="ss-item">
           <div className="ss-val">{active?.latency || "—"}</div>
           <div className="ss-lbl">{t("usage.avgLatency")}</div>
         </div>

@@ -339,8 +339,15 @@ function finalizeSession(
   const content = JSON.stringify(payload);
   db.run("INSERT INTO messages (session_id, role, content, tokens, latency) VALUES (?, 'assistant', ?, ?, ?)",
     [sessionId, content, totalTokens, `${latencyMs}ms`]);
-  db.run("UPDATE sessions SET status = 'idle', tokens = ?, latency = ?, updated_at = datetime('now') WHERE id = ?",
-    [totalTokens, `${latencyMs}ms`, sessionId]);
+  // Accumulate total tokens across the whole session (not just the last message).
+  // Add cacheHit to totalTokens because some providers report prompt_token cache
+  // hits separately (not already included in input_tokens/prompt_tokens).
+  const cacheHit = (response.usage?.cache_read_input_tokens as number) || 0;
+  const cacheMiss = (response.usage?.cache_creation_input_tokens as number) || 0;
+  db.run(
+    "UPDATE sessions SET status = 'idle', tokens = tokens + ?, cache_hit_tokens = cache_hit_tokens + ?, cache_miss_tokens = cache_miss_tokens + ?, latency = ?, updated_at = datetime('now') WHERE id = ?",
+    [totalTokens + cacheHit, cacheHit, cacheMiss, `${latencyMs}ms`, sessionId]
+  );
   notifySessionsChanged();
   notifyMessagesChanged(sessionId);
 }
@@ -450,8 +457,8 @@ async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: 
                 usage = {
                   inputTokens: j.usage.prompt_tokens || 0,
                   outputTokens: j.usage.completion_tokens || 0,
-                  cacheHitTokens: j.usage.prompt_cache_hit_tokens || 0,
-                  cacheMissTokens: j.usage.prompt_cache_miss_tokens || 0,
+                  cacheHitTokens: j.usage.prompt_tokens_details?.cached_tokens ?? j.usage.prompt_cache_hit_tokens ?? 0,
+                  cacheMissTokens: (j.usage.prompt_tokens || 0) - (j.usage.prompt_tokens_details?.cached_tokens ?? j.usage.prompt_cache_hit_tokens ?? 0),
                 };
               }
               if (j.model && !responseModel) responseModel = j.model;
@@ -507,8 +514,8 @@ async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: 
       usage = {
         inputTokens: j.usage?.prompt_tokens || 0,
         outputTokens: j.usage?.completion_tokens || 0,
-        cacheHitTokens: j.usage?.prompt_cache_hit_tokens || 0,
-        cacheMissTokens: j.usage?.prompt_cache_miss_tokens || 0,
+        cacheHitTokens: j.usage?.prompt_tokens_details?.cached_tokens ?? j.usage?.prompt_cache_hit_tokens ?? 0,
+        cacheMissTokens: (j.usage?.prompt_tokens || 0) - (j.usage?.prompt_tokens_details?.cached_tokens ?? j.usage?.prompt_cache_hit_tokens ?? 0),
       };
       assistantText = j.choices?.[0]?.message?.content || "";
       thinkingText = j.choices?.[0]?.message?.reasoning_content || "";
@@ -617,11 +624,8 @@ async function proxyAnthropic(gatewayKey: string, request: Request, set: { statu
                 usage = {
                   inputTokens: j.usage.input_tokens || 0,
                   outputTokens: j.usage.output_tokens || 0,
-                  // Support both Anthropic-standard names (cache_read_input_tokens)
-                  // and OpenAI-style names (prompt_cache_hit_tokens) that some
-                  // Anthropic-format-compatible upstreams (e.g. Kimi k3) emit.
                   cacheHitTokens: j.usage.cache_read_input_tokens ?? j.usage.prompt_cache_hit_tokens ?? 0,
-                  cacheMissTokens: j.usage.cache_creation_input_tokens ?? j.usage.prompt_cache_miss_tokens ?? 0,
+                  cacheMissTokens: j.usage.input_tokens || 0,
                 };
               }
               if (j.type === "message_start" && j.message?.model && !responseModel) {
@@ -680,7 +684,7 @@ async function proxyAnthropic(gatewayKey: string, request: Request, set: { statu
         inputTokens: j.usage?.input_tokens || 0,
         outputTokens: j.usage?.output_tokens || 0,
         cacheHitTokens: j.usage?.cache_read_input_tokens ?? j.usage?.prompt_cache_hit_tokens ?? 0,
-        cacheMissTokens: j.usage?.cache_creation_input_tokens ?? j.usage?.prompt_cache_miss_tokens ?? 0,
+        cacheMissTokens: j.usage?.input_tokens || 0,
       };
       // Anthropic content is an array of blocks: [{type:"text",...}, {type:"thinking",...}, {type:"tool_use",...}]
       const blocks = j.content as Array<{ type: string; text?: string; thinking?: string; id?: string; name?: string; input?: Record<string, unknown> }> | undefined;
