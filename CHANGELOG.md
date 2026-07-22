@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.2] - 2026-07-22
+
+### Fixed
+- **Cache hit rate always 100%**: `cacheMissTokens` was incorrectly set to `cache_creation_input_tokens` (cache write tokens, always ~0 on hit), causing hit rate to show 100%. Now correctly uses actual `input_tokens` for miss count.
+- OpenAI path: parse `prompt_tokens_details.cached_tokens` for cache hits instead of the non-existent `prompt_cache_hit_tokens` field.
+
 ## [0.1.5] - 2026-07-03
 
 ### Added
