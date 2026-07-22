@@ -50,6 +50,11 @@ Update to the latest version anytime:
 pulse update
 ```
 
+> **💡 For VPN / proxy updates:**
+> ```bash
+> HTTPS_PROXY=http://127.0.0.1:7890 pulse update
+> ```
+
 ### From source (development)
 
 ```bash

@@ -50,6 +50,11 @@ pulse run
 pulse update
 ```
 
+> **💡 如需 VPN / 代理更新：**
+> ```bash
+> HTTPS_PROXY=http://127.0.0.1:7890 pulse update
+> ```
+
 ### 从源码运行（开发模式）
 
 ```bash
