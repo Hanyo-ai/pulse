@@ -79,6 +79,8 @@ export interface Endpoint {
   provider_key: string;
   endpoint_url: string;
   model_name: string;
+  /** JSON array of model names this endpoint supports, e.g. ["gpt-4o","gpt-4o-mini"] */
+  models: string;
   api_key_masked: string;
   gateway_key: string;
   status: string;
@@ -131,4 +133,18 @@ export interface AuthContext {
   token: string;
 }
 
-export type Section = "session-monitor" | "logs" | "endpoints" | "usage" | "users" | "login";
+export type Section = "session-monitor" | "logs" | "endpoints" | "keys" | "usage" | "users" | "login";
+
+/** Standalone gateway access credential (see /api/keys). */
+export interface GatewayKey {
+  id: number;
+  name: string;
+  /** Full key — only present in the create response. */
+  key?: string;
+  key_masked: string;
+  /** JSON array of allowed model names; empty array = all models. */
+  models: string;
+  enabled: number;
+  created_at?: string;
+  updated_at?: string;
+}

@@ -3,7 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PULSE— AI Gateway</title>
+    <title>PULSE — AI Gateway</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%233366ff'/><text x='16' y='23' text-anchor='middle' font-size='20'>⚡</text></svg>" />
+    <script>
+      (function(){
+        try {
+          var t = localStorage.getItem("pulse_theme");
+          if (t && t !== "system") document.documentElement.setAttribute("data-theme", t);
+        } catch(e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

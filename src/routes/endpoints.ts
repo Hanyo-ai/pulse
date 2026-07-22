@@ -14,6 +14,7 @@ interface EndpointRow {
   display_name: string;
   provider_format: string;
   model_name: string;
+  models: string;
   api_key: string;
 }
 
@@ -47,27 +48,56 @@ export const endpointsRoutes = new Elysia({ prefix: "/api/endpoints" })
     const row = db.query("SELECT * FROM endpoints WHERE id = ?").get(id) as EndpointRow | undefined;
     return row ? toEndpoint(row) : null;
   })
-  .post("/", ({ body, headers }) => {
+  .post("/", ({ body, headers, set }) => {
     const result = requireAdmin(headers["authorization"] ?? null);
     if (result instanceof Response) return result;
 
     const db = getDb();
-    const { display_name, provider_name, provider_key, endpoint_url, model_name, api_key,
+    const { display_name, provider_name, provider_key, endpoint_url, model_name, models, api_key,
       price_input_per_m, price_output_per_m, price_cache_input_per_m } =
       body as {
         display_name: string; provider_name: string; provider_key: string;
-        endpoint_url: string; model_name: string; api_key: string;
+        endpoint_url: string; model_name: string; models?: string; api_key: string;
         price_input_per_m?: number; price_output_per_m?: number;
         price_cache_input_per_m?: number;
       };
 
-    const gatewayKey = "sgw_" + Array.from({ length: 24 }, () => "abcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(Math.random() * 36)]).join("");
+    // No more per-endpoint random keys: authentication is centralized in
+    // the gateway_keys table (managed from the API Keys page). Endpoints
+    // only declare which models they serve; any enabled gateway key whose
+    // whitelist permits the model can route here.
+
+    // Normalize models: if only model_name provided, populate models automatically
+    const modelsJson = models || (model_name ? JSON.stringify([model_name]) : '[]');
+
+    // Validate: ensure no duplicate model names across endpoints
+    try {
+      const newModels = JSON.parse(modelsJson) as string[];
+      if (newModels.length > 0) {
+        const existing = db.query("SELECT id, display_name, models FROM endpoints WHERE enabled = 1").all() as Array<{id: number; display_name: string; models: string}>;
+        const conflicts: string[] = [];
+        for (const row of existing) {
+          try {
+            const existingModels = JSON.parse(row.models) as string[];
+            for (const m of newModels) {
+              if (existingModels.includes(m)) {
+                conflicts.push(`"${m}" (already used by endpoint ${row.id} "${row.display_name}")`);
+              }
+            }
+          } catch { /* skip invalid JSON */ }
+        }
+        if (conflicts.length > 0) {
+          set.status = 409;
+          return { error: `Model name conflict: ${conflicts.join(", ")}` };
+        }
+      }
+    } catch { /* skip validation if models is not valid JSON */ }
 
     db.run(
-      `INSERT INTO endpoints (display_name, provider_name, provider_key, endpoint_url, model_name, api_key, gateway_key,
+      `INSERT INTO endpoints (display_name, provider_name, provider_key, endpoint_url, model_name, models, api_key,
         price_input_per_m, price_output_per_m, price_cache_input_per_m)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [display_name, provider_name, provider_key, endpoint_url, model_name, api_key, gatewayKey,
+      [display_name, provider_name, provider_key, endpoint_url, model_name, modelsJson, api_key,
         price_input_per_m || 0, price_output_per_m || 0, price_cache_input_per_m || 0]
     );
     const row = db.query("SELECT * FROM endpoints ORDER BY id DESC LIMIT 1").get() as EndpointRow;
@@ -81,7 +111,7 @@ export const endpointsRoutes = new Elysia({ prefix: "/api/endpoints" })
     const fields = body as Record<string, unknown>;
     const allowedFields = [
       "provider_name", "provider_key", "endpoint_url", "status", "latency_ms",
-      "error_rate", "enabled", "display_name", "provider_format", "model_name", "api_key",
+      "error_rate", "enabled", "display_name", "provider_format", "model_name", "models", "api_key",
       "price_input_per_m", "price_output_per_m", "price_cache_input_per_m",
     ];
     const setClauses: string[] = [];
@@ -93,6 +123,31 @@ export const endpointsRoutes = new Elysia({ prefix: "/api/endpoints" })
       }
     }
     if (setClauses.length > 0) {
+      // Validate: ensure no duplicate model names when updating models field
+      const newModelsJson = fields["models"] as string | undefined;
+      if (newModelsJson) {
+        try {
+          const newModels = JSON.parse(newModelsJson) as string[];
+          if (newModels.length > 0) {
+            const existing = db.query("SELECT id, display_name, models FROM endpoints WHERE enabled = 1 AND id != ?").all(Number(id)) as Array<{id: number; display_name: string; models: string}>;
+            const conflicts: string[] = [];
+            for (const row of existing) {
+              try {
+                const existingModels = JSON.parse(row.models) as string[];
+                for (const m of newModels) {
+                  if (existingModels.includes(m)) {
+                    conflicts.push(`"${m}" (already used by endpoint ${row.id} "${row.display_name}")`);
+                  }
+                }
+              } catch { /* skip invalid JSON */ }
+            }
+            if (conflicts.length > 0) {
+              return new Response(JSON.stringify({ error: `Model name conflict: ${conflicts.join(", ")}` }), { status: 409 });
+            }
+          }
+        } catch { /* skip validation if models is not valid JSON */ }
+      }
+
       setClauses.push("updated_at = datetime('now')");
       values.push(id);
       db.run(`UPDATE endpoints SET ${setClauses.join(", ")} WHERE id = ?`, values as (string | number | null)[]);

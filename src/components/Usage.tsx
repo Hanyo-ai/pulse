@@ -146,49 +146,63 @@ export function Usage({ token }: UsageProps) {
   });
   const [breakdown, setBreakdown] = useState<ModelBreakdown[]>([]);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
+  const [timeRange, setTimeRange] = useState("7d");
+  const [providerFilter, setProviderFilter] = useState("");
+  const [modelFilter, setModelFilter] = useState("");
 
   useEffect(() => {
     const headers = { Authorization: `Bearer ${token}` };
+    const params = new URLSearchParams();
+    if (timeRange) params.set("range", timeRange);
 
-    fetch("/api/usage/stats", { headers })
+    fetch(`/api/usage/stats?${params}`, { headers })
       .then((r) => r.json())
       .then(setStats)
       .catch(console.error);
 
-    fetch("/api/usage/by-model", { headers })
+    fetch(`/api/usage/by-model?${params}`, { headers })
       .then((r) => r.json())
       .then((data) => {
         if (Array.isArray(data)) setBreakdown(data);
       })
       .catch(console.error);
 
-    fetch("/api/usage/trend", { headers })
+    fetch(`/api/usage/trend?${params}`, { headers })
       .then((r) => r.json())
       .then((data) => {
         if (Array.isArray(data)) setTrend(data);
       })
       .catch(console.error);
-  }, [token]);
+  }, [token, timeRange]);
+
+  // Client-side filter breakdown by provider and model
+  const filteredBreakdown = breakdown.filter((b) => {
+    if (providerFilter && b.provider !== providerFilter) return false;
+    if (modelFilter && b.model !== modelFilter) return false;
+    return true;
+  });
+
+  // Derive unique models from breakdown for the model filter dropdown
+  const availableModels = [...new Set(breakdown.map((b) => b.model))].sort();
 
   return (
-    <section className="section active" style={{ overflowY: "auto", padding: "24px" }}>
+    <section className="section active page">
       <div className="filter-bar">
-        <select>
-          <option>{t("usage.last7d")}</option>
-          <option>{t("usage.last24h")}</option>
-          <option>{t("usage.last30d")}</option>
+        <select value={timeRange} onChange={(e) => setTimeRange(e.target.value)}>
+          <option value="24h">{t("usage.last24h")}</option>
+          <option value="7d">{t("usage.last7d")}</option>
+          <option value="30d">{t("usage.last30d")}</option>
         </select>
-        <select>
-          <option>{t("usage.allProviders")}</option>
+        <select value={providerFilter} onChange={(e) => setProviderFilter(e.target.value)}>
+          <option value="">{t("usage.allProviders")}</option>
           <option>OpenAI</option>
           <option>Anthropic</option>
         </select>
-        <select>
-          <option>{t("usage.allModels")}</option>
-          <option>gpt-4o</option>
-          <option>gpt-4o-mini</option>
-          <option>claude-sonnet-4</option>
-          <option>claude-3-5-haiku</option>
+        <select value={modelFilter} onChange={(e) => setModelFilter(e.target.value)}>
+          <option value="">{t("usage.allModels")}</option>
+          {availableModels.map((m) => (
+            <option key={m}>{m}</option>
+          ))}
         </select>
       </div>
 
@@ -257,8 +271,8 @@ export function Usage({ token }: UsageProps) {
               </tr>
             </thead>
             <tbody>
-              {breakdown.length > 0
-                ? breakdown.map((b, i) => (
+              {filteredBreakdown.length > 0
+                ? filteredBreakdown.map((b, i) => (
                     <tr key={i}>
                       <td className="mono">{b.model}</td>
                       <td>{b.provider}</td>
@@ -270,7 +284,7 @@ export function Usage({ token }: UsageProps) {
                   ))
                 : (
                   <tr>
-                    <td colSpan={6} style={{ textAlign: "center", color: "var(--muted)", padding: "24px" }}>{t("usage.noData")}</td>
+                    <td colSpan={6} className="empty-state">{t("usage.noData")}</td>
                   </tr>
                 )}
             </tbody>

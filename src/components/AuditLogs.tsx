@@ -67,7 +67,7 @@ export function AuditLogs({ token }: AuditLogsProps) {
   };
 
   return (
-    <section className="section active" style={{ overflowY: "auto", padding: "24px" }}>
+    <section className="section active page">
       <div className="filter-bar">
         <input
           type="text"
@@ -112,7 +112,7 @@ export function AuditLogs({ token }: AuditLogsProps) {
                 title={l.response_body || l.request_body ? t("logs.clickHint") : ""}
               >
                 <td className="mono">
-                  {new Date(l.created_at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                  {new Date(l.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                 </td>
                 <td className="mono">{l.request_id}</td>
                 <td className="mono">{l.session_id}</td>
@@ -170,7 +170,7 @@ export function AuditLogs({ token }: AuditLogsProps) {
                 </div>
               )}
               {!selectedLog.request_body && !selectedLog.response_body && (
-                  <div style={{ textAlign: "center", color: "var(--muted)", padding: "24px" }}>{t("logs.noData")}</div>
+                  <div className="empty-state">{t("logs.noData")}</div>
               )}
             </div>
           </div>

@@ -160,6 +160,50 @@ function initSchema(db: Database) {
       // column already exists, ignore
     }
   }
+
+  // Migration: add models JSON array to endpoints (multi-model support)
+  try {
+    db.run("ALTER TABLE endpoints ADD COLUMN models TEXT DEFAULT '[]'");
+  } catch {
+    // column already exists, ignore
+  }
+
+  // ── Gateway keys: standalone access credentials, decoupled from endpoints ──
+  // Each key can be restricted to a whitelist of model names; an empty/NULL
+  // whitelist means "all models". Requests route: key → allowed? → endpoint
+  // that declares the requested model.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS gateway_keys (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key TEXT UNIQUE NOT NULL,
+      name TEXT DEFAULT '',
+      models TEXT DEFAULT '[]',
+      enabled INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  // Migrate legacy per-endpoint gateway keys into the new table so existing
+  // installs keep working without any manual step.
+  try {
+    const legacy = db.query(
+      "SELECT DISTINCT gateway_key FROM endpoints WHERE gateway_key != ''"
+    ).all() as { gateway_key: string }[];
+    const insert = db.prepare(
+      "INSERT OR IGNORE INTO gateway_keys (key, name, models) VALUES (?, ?, '[]')"
+    );
+    for (const row of legacy) insert.run(row.gateway_key, "legacy");
+  } catch {
+    // endpoints table may not have gateway_key yet on a fresh schema
+  }
+
+  // Indexes for hot query paths (log retention cleanup, dashboards, message loading)
+  db.run("CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_request_logs_session_id ON request_logs(session_id)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_sessions_endpoint_id ON sessions(endpoint_id)");
 }
 
 function seedAdmin(db: Database) {

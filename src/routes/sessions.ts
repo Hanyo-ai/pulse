@@ -1,6 +1,7 @@
 import { Elysia } from "elysia";
 import { getDb } from "../db";
 import { requireAuth } from "../middleware/auth";
+import { notifySessionsChanged, notifyMessagesChanged } from "../ws";
 
 export const sessionsRoutes = new Elysia({ prefix: "/api/sessions" })
   .get("/", ({ headers }) => {
@@ -59,6 +60,7 @@ export const sessionsRoutes = new Elysia({ prefix: "/api/sessions" })
       "INSERT INTO sessions (id, title, provider, model, user_id) VALUES (?, ?, ?, ?, ?)",
       [id, title, provider, model, result.user.id]
     );
+    notifySessionsChanged();
     return db.query("SELECT * FROM sessions WHERE id = ?").get(id);
   })
   .put("/:id", ({ params: { id }, body, headers }) => {
@@ -85,6 +87,7 @@ export const sessionsRoutes = new Elysia({ prefix: "/api/sessions" })
       values.push(id);
       db.run(`UPDATE sessions SET ${fields.join(", ")} WHERE id = ?`, values);
     }
+    notifySessionsChanged();
     return db.query("SELECT * FROM sessions WHERE id = ?").get(id);
   })
   .delete("/:id", ({ params: { id }, headers }) => {
@@ -100,6 +103,7 @@ export const sessionsRoutes = new Elysia({ prefix: "/api/sessions" })
     }
 
     db.run("DELETE FROM sessions WHERE id = ?", [id]);
+    notifySessionsChanged();
     return { success: true };
   })
   .post("/:id/messages", ({ params: { id }, body, headers }) => {
@@ -125,6 +129,8 @@ export const sessionsRoutes = new Elysia({ prefix: "/api/sessions" })
       [id, role, content, tokens || 0, latency || "—"]
     );
     db.run("UPDATE sessions SET updated_at = datetime('now') WHERE id = ?", [id]);
+    notifySessionsChanged();
+    notifyMessagesChanged(id);
     return db
       .query("SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC")
       .all(id);
@@ -138,6 +144,8 @@ export const sessionsRoutes = new Elysia({ prefix: "/api/sessions" })
     const staleResult = db.run(
       "UPDATE sessions SET status = 'idle' WHERE status = 'live' AND updated_at < datetime('now', '-5 minutes')"
     );
+
+    if (staleResult.changes > 0) notifySessionsChanged();
 
     return {
       success: true,

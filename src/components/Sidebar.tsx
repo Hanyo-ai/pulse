@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Section, User } from "../types";
 import { useTranslation } from "../i18n";
 
-const VERSION = "0.0.1";
+const VERSION = "0.1.10";
 
 interface SidebarProps {
   activeSection: Section;
@@ -16,7 +16,13 @@ interface SidebarProps {
 export function Sidebar({ activeSection, onNavigate, sessionCount, user, open, token }: SidebarProps) {
   const { t, lang, setLang } = useTranslation();
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<"lang" | "password">("lang");
+  const [settingsTab, setSettingsTab] = useState<"lang" | "password" | "theme">("lang");
+  const [theme, setTheme] = useState<string>(() => {
+    if (typeof document !== "undefined") {
+      return document.documentElement.getAttribute("data-theme") || "system";
+    }
+    return "system";
+  });
   const [oldPw, setOldPw] = useState("");
   const [newPw, setNewPw] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
@@ -24,6 +30,16 @@ export function Sidebar({ activeSection, onNavigate, sessionCount, user, open, t
   const [pwSuccess, setPwSuccess] = useState("");
   const [pwLoading, setPwLoading] = useState(false);
   const isAdmin = user?.role === "admin";
+
+  const applyTheme = (t: string) => {
+    setTheme(t);
+    if (t === "system") {
+      document.documentElement.removeAttribute("data-theme");
+    } else {
+      document.documentElement.setAttribute("data-theme", t);
+    }
+    try { localStorage.setItem("pulse_theme", t); } catch { /* */ }
+  };
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -66,7 +82,7 @@ export function Sidebar({ activeSection, onNavigate, sessionCount, user, open, t
   return (
     <aside className={`sidebar${open ? " open" : ""}`} id="sidebar">
       <div className="sidebar-brand">
-        <div className="logo-mark">S</div>
+        <div className="logo-mark">⚡</div>
         <span className="logo-text">PULSE</span>
       </div>
       <nav className="sidebar-nav">
@@ -105,6 +121,18 @@ export function Sidebar({ activeSection, onNavigate, sessionCount, user, open, t
               <path d="M9 1v3m0 10v3M1 9h3m10 0h3" />
             </svg>
             {t("nav.endpoints")}
+          </button>
+        )}
+        {isAdmin && (
+          <button
+            className={activeSection === "keys" ? "active" : ""}
+            onClick={() => onNavigate("keys")}
+          >
+            <svg className="nav-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6">
+              <circle cx="6" cy="9" r="3.5" />
+              <path d="M9.5 9H17m-2.5 0v3m-3-3v2" />
+            </svg>
+            {t("nav.keys")}
           </button>
         )}
         <button
@@ -163,6 +191,16 @@ export function Sidebar({ activeSection, onNavigate, sessionCount, user, open, t
                   {t("settings.language")}
                 </button>
                 <button
+                  className={`settings-nav-item${settingsTab === "theme" ? " active" : ""}`}
+                  onClick={() => setSettingsTab("theme")}
+                >
+                  <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" width="16" height="16">
+                    <circle cx="9" cy="9" r="4" />
+                    <path d="M9 1v2m0 12v2M1 9h2m12 0h2" />
+                  </svg>
+                  Theme
+                </button>
+                <button
                   className={`settings-nav-item${settingsTab === "password" ? " active" : ""}`}
                   onClick={() => setSettingsTab("password")}
                 >
@@ -182,16 +220,27 @@ export function Sidebar({ activeSection, onNavigate, sessionCount, user, open, t
             {/* Right content */}
             <div className="settings-content">
               <div className="settings-content-header">
-                <h3>{settingsTab === "lang" ? t("settings.language") : t("settings.changePassword")}</h3>
+                <h3>{settingsTab === "lang" ? t("settings.language") : settingsTab === "theme" ? "Theme" : t("settings.changePassword")}</h3>
                 <button className="settings-modal-close" onClick={() => setSettingsOpen(false)}>×</button>
               </div>
               <div className="settings-content-body">
                 {settingsTab === "lang" && (
-                  <div className="settings-field">
-                    <label className="settings-label">{t("settings.language")}</label>
-                    <select value={lang} onChange={(e) => setLang(e.target.value as "en" | "zh")} className="settings-select">
+                  <div className="field">
+                    <label className="field-label">{t("settings.language")}</label>
+                    <select value={lang} onChange={(e) => setLang(e.target.value as "en" | "zh")} className="input settings-select">
                       <option value="en">English</option>
                       <option value="zh">中文</option>
+                    </select>
+                  </div>
+                )}
+
+                {settingsTab === "theme" && (
+                  <div className="field">
+                    <label className="field-label">Theme</label>
+                    <select value={theme} onChange={(e) => applyTheme(e.target.value)} className="input settings-select">
+                      <option value="system">🖥 System</option>
+                      <option value="light">☀ Light</option>
+                      <option value="dark">🌙 Dark</option>
                     </select>
                   </div>
                 )}
@@ -200,16 +249,16 @@ export function Sidebar({ activeSection, onNavigate, sessionCount, user, open, t
                   <form onSubmit={handleChangePassword}>
                     {pwError && <div className="settings-msg error">{pwError}</div>}
                     {pwSuccess && <div className="settings-msg success">{pwSuccess}</div>}
-                    <div className="settings-field">
-                      <label className="settings-label">{t("settings.oldPassword")}</label>
+                    <div className="field">
+                      <label className="field-label">{t("settings.oldPassword")}</label>
                       <input type="password" value={oldPw} onChange={(e) => setOldPw(e.target.value)} required />
                     </div>
-                    <div className="settings-field">
-                      <label className="settings-label">{t("settings.newPassword")}</label>
+                    <div className="field">
+                      <label className="field-label">{t("settings.newPassword")}</label>
                       <input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} required minLength={8} />
                     </div>
-                    <div className="settings-field">
-                      <label className="settings-label">{t("settings.confirmPassword")}</label>
+                    <div className="field">
+                      <label className="field-label">{t("settings.confirmPassword")}</label>
                       <input type="password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} required />
                     </div>
                     <button type="submit" className="btn btn-primary btn-sm" disabled={pwLoading} style={{ width: "100%", justifyContent: "center" }}>

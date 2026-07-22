@@ -4,18 +4,39 @@ import { logsRoutes } from "./routes/logs";
 import { endpointsRoutes } from "./routes/endpoints";
 import { usageRoutes } from "./routes/usage";
 import { authRoutes } from "./routes/auth";
+import { keysRoutes } from "./routes/keys";
+import { retentionRoutes, startLogRetentionLoop } from "./routes/retention";
 import { getDb } from "./db";
+import { notifySessionsChanged, notifyMessagesChanged, wsRegister, wsUnregister } from "./ws";
 import index from "./index.html";
 
 // Initialize database on startup
 getDb();
 
-// Gateway proxy helpers
+// Start daily pruning of request_logs (PULSE_LOG_RETENTION_DAYS, default 7)
+startLogRetentionLoop();
+
+// ── Constants ──
+const UPSTREAM_TIMEOUT_MS = 120_000;
+
+// ── Fetch with timeout ──
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = UPSTREAM_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ── Gateway proxy helpers ──
 interface EndpointRow {
   id: number;
   endpoint_url: string;
   api_key: string;
   model_name: string;
+  models: string;
   provider_name: string;
   price_input_per_m: number;
   price_output_per_m: number;
@@ -33,12 +54,100 @@ function normalizeSystem(system: unknown): string | undefined {
   return undefined;
 }
 
-function lookupEndpoint(gatewayKey: string): EndpointRow | null {
-  if (!gatewayKey) return null;
+function parseModels(modelsJson: string): string[] {
+  try {
+    const arr = modelsJson ? JSON.parse(modelsJson) : [];
+    return Array.isArray(arr) ? arr.filter((m): m is string => typeof m === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+interface GatewayKeyRow {
+  id: number;
+  key: string;
+  name: string;
+  models: string; // JSON whitelist; empty array = all models
+  enabled: number;
+}
+
+const EP_COLS =
+  "id, endpoint_url, api_key, model_name, models, provider_name, price_input_per_m, price_output_per_m, price_cache_input_per_m";
+
+// ── Gateway resolution ──
+// Two phases:
+//  1. Authenticate the presented key against the standalone gateway_keys
+//     table, then enforce its model whitelist.
+//  2. Route to the enabled endpoint that declares the requested model.
+type LookupResult =
+  | { ok: true; ep: EndpointRow }
+  | { ok: false; status: number; error: string };
+
+function resolveGateway(gatewayKey: string, requestedModel?: string): LookupResult {
+  if (!gatewayKey) return { ok: false, status: 401, error: "Invalid or disabled API key" };
   const db = getDb();
-  return db.query(
-    "SELECT id, endpoint_url, api_key, model_name, provider_name, price_input_per_m, price_output_per_m, price_cache_input_per_m FROM endpoints WHERE gateway_key = ? AND enabled = 1"
-  ).get(gatewayKey) as EndpointRow | null;
+
+  // Phase 1: key authentication + permission check
+  const keyRow = db.query(
+    "SELECT id, key, name, models, enabled FROM gateway_keys WHERE key = ?"
+  ).get(gatewayKey) as GatewayKeyRow | null;
+
+  if (!keyRow) return { ok: false, status: 401, error: "Invalid or disabled API key" };
+  if (!keyRow.enabled) return { ok: false, status: 401, error: "Invalid or disabled API key" };
+
+  const allowed = parseModels(keyRow.models);
+  const whitelist: string[] | null = allowed.length > 0 ? allowed : null; // null = unrestricted
+
+  if (whitelist && requestedModel && !whitelist.includes(requestedModel)) {
+    return { ok: false, status: 403, error: `Model "${requestedModel}" not allowed for this API key` };
+  }
+
+  // Phase 2: route to an endpoint declaring the requested model
+  const endpoints = db.query(`SELECT ${EP_COLS} FROM endpoints WHERE enabled = 1`).all() as EndpointRow[];
+  let candidates = endpoints;
+  if (requestedModel) {
+    candidates = endpoints.filter((ep) => {
+      const models = parseModels(ep.models);
+      return models.includes(requestedModel);
+    });
+  }
+  if (whitelist) {
+    candidates = candidates.filter((ep) => {
+      const models = parseModels(ep.models);
+      const effective = models.length > 0 ? models : (ep.model_name ? [ep.model_name] : []);
+      return effective.some((m) => whitelist.includes(m));
+    });
+  }
+
+  if (candidates.length === 1) return { ok: true, ep: candidates[0]! };
+  if (candidates.length === 0) {
+    return { ok: false, status: 400, error: requestedModel
+      ? `No enabled endpoint serves model "${requestedModel}"`
+      : "No enabled endpoint available" };
+  }
+  return { ok: false, status: 400, error: `Model "${requestedModel ?? ""}" is ambiguous across ${candidates.length} endpoints` };
+}
+
+// Aggregate view for GET /v1/models: every model this key may see.
+function listModelsForKey(gatewayKey: string): string[] | null {
+  const db = getDb();
+  const keyRow = db.query("SELECT models, enabled FROM gateway_keys WHERE key = ?").get(gatewayKey) as
+    { models: string; enabled: number } | null;
+  if (!keyRow) return null;
+  if (!keyRow.enabled) return null;
+  const whitelist = parseModels(keyRow.models);
+
+  const endpoints = db.query(`SELECT ${EP_COLS} FROM endpoints WHERE enabled = 1`).all() as EndpointRow[];
+
+  const out = new Set<string>();
+  for (const ep of endpoints) {
+    const models = parseModels(ep.models);
+    const effective = models.length > 0 ? models : (ep.model_name ? [ep.model_name] : []);
+    for (const m of effective) {
+      if (!whitelist || whitelist.length === 0 || whitelist.includes(m)) out.add(m);
+    }
+  }
+  return [...out];
 }
 
 interface UsageInfo {
@@ -232,18 +341,87 @@ function finalizeSession(
     [sessionId, content, totalTokens, `${latencyMs}ms`]);
   db.run("UPDATE sessions SET status = 'idle', tokens = ?, latency = ?, updated_at = datetime('now') WHERE id = ?",
     [totalTokens, `${latencyMs}ms`, sessionId]);
+  notifySessionsChanged();
+  notifyMessagesChanged(sessionId);
+}
+
+// ── Shared stream proxy helper ──
+function createProxyStream(
+  upstreamBody: ReadableStream<Uint8Array>,
+  upstreamStatus: number,
+  setHeaders: Record<string, string>,
+  onFinalize: (buffer: string) => void,
+  logLabel = "Stream",
+): Response {
+  let buffer = "";
+  let streamFinalized = false;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+
+  function finalizeStream() {
+    if (streamFinalized) return;
+    streamFinalized = true;
+    try { onFinalize(buffer); } catch (e) { console.error(`${logLabel} finalize error:`, e); }
+  }
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      reader = upstreamBody.getReader();
+      let readError: unknown = null;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = new TextDecoder().decode(value);
+          buffer += chunk;
+          controller.enqueue(value);
+        }
+      } catch (err) {
+        readError = err;
+        console.error(`${logLabel} read error:`, err);
+      } finally {
+        finalizeStream();
+        try { reader.releaseLock(); } catch { /* ignore */ }
+        if (readError) {
+          // Propagate the error so the client sees a proper failure
+          // instead of "incomplete chunked read" from a truncated stream.
+          try { controller.error(readError as Error); } catch { /* ignore */ }
+        } else {
+          try { controller.close(); } catch { /* ignore */ }
+        }
+      }
+    },
+    cancel(reason) {
+      console.warn(`${logLabel} cancelled:`, reason);
+      finalizeStream();
+      try { reader?.releaseLock(); } catch { /* ignore */ }
+    },
+  });
+
+  return new Response(stream, { status: upstreamStatus, headers: setHeaders });
 }
 
 async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: number; headers: Record<string, string> }) {
-  const ep = lookupEndpoint(gatewayKey);
-  if (!ep) { set.status = 401; return { error: "Invalid or disabled API key" }; }
-
+  // Read the body before lookup so the request's `model` can act as the router
+  // when several endpoints share one gateway key.
   let body: Record<string, unknown>;
   try { body = await request.json() as Record<string, unknown>; }
   catch { set.status = 400; return { error: "Invalid JSON body" }; }
 
+  const epResult = resolveGateway(gatewayKey, typeof body.model === "string" ? body.model : undefined);
+  if (!epResult.ok) { set.status = epResult.status; return { error: epResult.error }; }
+  const ep = epResult.ep;
+
   const baseUrl = ep.endpoint_url.replace(/\/+$/, "");
-  const model = (body.model || ep.model_name) as string;
+  // Map external model name (from models array) to upstream model name (model_name)
+  // e.g. "deepseek-v4-pro-alt" -> "deepseek-v4-pro"
+  const requestedModel = (body.model || ep.model_name) as string;
+  const allowedModels: string[] = parseModels(ep.models);
+  const model = allowedModels.includes(requestedModel) && ep.model_name ? ep.model_name : requestedModel;
+  // Validate model against allowed list if configured
+  if (allowedModels.length > 0 && !allowedModels.includes(requestedModel)) {
+    set.status = 400;
+    return { error: `Model "${requestedModel}" not allowed. Allowed: ${allowedModels.join(", ")}` };
+  }
   const start = Date.now();
   const isStream = !!body.stream;
   const reqMessages = (body.messages as BodyMessage[] | undefined) || [];
@@ -251,11 +429,14 @@ async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: 
   const existingSessionId = request.headers.get("x-session-id") || undefined;
   const sessionId = getOrCreateSession(ep.id, ep.provider_name || baseUrl, model, reqMessages, systemPrompt, existingSessionId);
 
+  // Notify WebSocket clients of new/updated session
+  notifySessionsChanged();
+
   // Add session ID to response headers
   set.headers["X-Session-Id"] = sessionId;
 
   try {
-    const upstream = await fetch(`${baseUrl}/chat/completions`, {
+    const upstream = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: { "Authorization": `Bearer ${ep.api_key}`, "Content-Type": "application/json" },
       body: JSON.stringify({ ...body, model }),
@@ -266,81 +447,68 @@ async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: 
       set.headers["Content-Type"] = "text/event-stream";
       set.headers["Cache-Control"] = "no-cache";
       set.headers["X-Accel-Buffering"] = "no";
-      const upstreamBody = upstream.body;
-      const stream = new ReadableStream({
-        async start(controller) {
-          const reader = upstreamBody.getReader();
-          let buffer = "";
-          let assistantText = "";
-          let thinkingText = "";
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              const chunk = new TextDecoder().decode(value);
-              buffer += chunk;
-              controller.enqueue(value);
-            }
-            let usage: UsageInfo = { inputTokens: 0, outputTokens: 0, cacheHitTokens: 0, cacheMissTokens: 0 };
-            let responseModel = "";
-            let stopReason = "";
-            const toolCallsByIndex = new Map<number, { id?: string; name: string; args: string }>();
-            for (const line of buffer.split("\n")) {
-              if (line.startsWith("data: ") && !line.includes("[DONE]")) {
-                try {
-                  const j = JSON.parse(line.slice(6));
-                  if (j.usage) {
-                    usage = {
-                      inputTokens: j.usage.prompt_tokens || 0,
-                      outputTokens: j.usage.completion_tokens || 0,
-                      cacheHitTokens: j.usage.prompt_cache_hit_tokens || 0,
-                      cacheMissTokens: j.usage.prompt_cache_miss_tokens || 0,
-                    };
-                  }
-                  if (j.model && !responseModel) responseModel = j.model;
-                  if (j.choices?.[0]?.finish_reason) stopReason = j.choices[0].finish_reason;
-                  const delta = j.choices?.[0]?.delta?.content;
-                  if (delta) assistantText += delta;
-                  // DeepSeek/OpenAI-compatible reasoning models stream chain-of-thought as reasoning_content
-                  const reasoningDelta = j.choices?.[0]?.delta?.reasoning_content;
-                  if (reasoningDelta) thinkingText += reasoningDelta;
-                  const toolDeltas = j.choices?.[0]?.delta?.tool_calls as
-                    Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }> | undefined;
-                  if (toolDeltas) {
-                    for (const td of toolDeltas) {
-                      const existing = toolCallsByIndex.get(td.index) || { id: td.id, name: "", args: "" };
-                      if (td.id) existing.id = td.id;
-                      if (td.function?.name) existing.name += td.function.name;
-                      if (td.function?.arguments) existing.args += td.function.arguments;
-                      toolCallsByIndex.set(td.index, existing);
-                    }
-                  }
-                } catch { /* */ }
+
+      return createProxyStream(upstream.body, upstream.status, set.headers, (buffer) => {
+        let usage: UsageInfo = { inputTokens: 0, outputTokens: 0, cacheHitTokens: 0, cacheMissTokens: 0 };
+        let assistantText = "";
+        let thinkingText = "";
+        let responseModel = "";
+        let stopReason = "";
+        const toolCallsByIndex = new Map<number, { id?: string; name: string; args: string }>();
+        for (const line of buffer.split("\n")) {
+          // Tolerate both "data: {...}" and "data:{...}" — some upstreams (e.g. Kimi k3)
+          // omit the space after the colon, which previously caused every line to be skipped.
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trimStart();
+          if (!payload || payload === "[DONE]") continue;
+          {
+            try {
+              const j = JSON.parse(payload);
+              if (j.usage) {
+                usage = {
+                  inputTokens: j.usage.prompt_tokens || 0,
+                  outputTokens: j.usage.completion_tokens || 0,
+                  cacheHitTokens: j.usage.prompt_cache_hit_tokens || 0,
+                  cacheMissTokens: j.usage.prompt_cache_miss_tokens || 0,
+                };
               }
-            }
-            const toolCalls: ToolCallInfo[] = [...toolCallsByIndex.values()].map((tc) => {
-              let input: Record<string, unknown> | undefined;
-              try { input = tc.args ? JSON.parse(tc.args) : undefined; } catch { input = { raw: tc.args }; }
-              return { id: tc.id, name: tc.name, input };
-            });
-            const cost = calcCost(ep, usage);
-            const totalTokens = usage.inputTokens + usage.outputTokens;
-            logRequest(ep.provider_name, model, upstream.status, Date.now() - start, usage, cost, sessionId, buffer, JSON.stringify(body));
-            finalizeSession(sessionId, {
-              text: assistantText,
-              thinking: thinkingText || undefined,
-              model: responseModel || (model as string),
-              stop_reason: stopReason,
-              tool_calls: toolCalls.length ? toolCalls : undefined,
-              usage: { input_tokens: usage.inputTokens, output_tokens: usage.outputTokens, cache_read_input_tokens: usage.cacheHitTokens, cache_creation_input_tokens: usage.cacheMissTokens },
-            }, totalTokens, Date.now() - start);
-          } finally {
-            reader.releaseLock();
-            controller.close();
+              if (j.model && !responseModel) responseModel = j.model;
+              if (j.choices?.[0]?.finish_reason) stopReason = j.choices[0].finish_reason;
+              const delta = j.choices?.[0]?.delta?.content;
+              if (delta) assistantText += delta;
+              const reasoningDelta = j.choices?.[0]?.delta?.reasoning_content;
+              if (reasoningDelta) thinkingText += reasoningDelta;
+              const toolDeltas = j.choices?.[0]?.delta?.tool_calls as
+                Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }> | undefined;
+              if (toolDeltas) {
+                for (const td of toolDeltas) {
+                  const existing = toolCallsByIndex.get(td.index) || { id: td.id, name: "", args: "" };
+                  if (td.id) existing.id = td.id;
+                  if (td.function?.name) existing.name += td.function.name;
+                  if (td.function?.arguments) existing.args += td.function.arguments;
+                  toolCallsByIndex.set(td.index, existing);
+                }
+              }
+            } catch { /* skip unparseable lines */ }
           }
-        },
-      });
-      return new Response(stream, { status: upstream.status, headers: set.headers });
+        }
+        const toolCalls: ToolCallInfo[] = [...toolCallsByIndex.values()].map((tc) => {
+          let input: Record<string, unknown> | undefined;
+          try { input = tc.args ? JSON.parse(tc.args) : undefined; } catch { input = { raw: tc.args }; }
+          return { id: tc.id, name: tc.name, input };
+        });
+        const cost = calcCost(ep, usage);
+        const totalTokens = usage.inputTokens + usage.outputTokens;
+        logRequest(ep.provider_name, model, upstream.status, Date.now() - start, usage, cost, sessionId, buffer, JSON.stringify(body));
+        finalizeSession(sessionId, {
+          text: assistantText,
+          thinking: thinkingText || undefined,
+          model: responseModel || (model as string),
+          stop_reason: stopReason,
+          tool_calls: toolCalls.length ? toolCalls : undefined,
+          usage: { input_tokens: usage.inputTokens, output_tokens: usage.outputTokens, cache_read_input_tokens: usage.cacheHitTokens, cache_creation_input_tokens: usage.cacheMissTokens },
+        }, totalTokens, Date.now() - start);
+      }, "OpenAI");
     }
 
     const text = await upstream.text();
@@ -392,21 +560,32 @@ async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: 
     set.headers["Content-Type"] = "application/json";
     return text;
   } catch (err: unknown) {
-    set.status = 502;
-    return { error: `Upstream error: ${err instanceof Error ? err.message : String(err)}` };
+    const isTimeout = err instanceof DOMException && err.name === "AbortError";
+    set.status = isTimeout ? 504 : 502;
+    return { error: isTimeout ? "Upstream request timed out" : `Upstream error: ${err instanceof Error ? err.message : String(err)}` };
   }
 }
 
 async function proxyAnthropic(gatewayKey: string, request: Request, set: { status: number; headers: Record<string, string> }) {
-  const ep = lookupEndpoint(gatewayKey);
-  if (!ep) { set.status = 401; return { error: "Invalid or disabled API key" }; }
-
+  // See proxyOpenAI: body parsed first so `model` can route shared keys.
   let body: Record<string, unknown>;
   try { body = await request.json() as Record<string, unknown>; }
   catch { set.status = 400; return { error: "Invalid JSON body" }; }
 
+  const epResult = resolveGateway(gatewayKey, typeof body.model === "string" ? body.model : undefined);
+  if (!epResult.ok) { set.status = epResult.status; return { error: epResult.error }; }
+  const ep = epResult.ep;
+
   const baseUrl = ep.endpoint_url.replace(/\/+$/, "");
-  const model = (body.model || ep.model_name) as string;
+  // Map external model name (from models array) to upstream model name (model_name)
+  const requestedModel = (body.model || ep.model_name) as string;
+  const allowedModels: string[] = parseModels(ep.models);
+  const model = allowedModels.includes(requestedModel) && ep.model_name ? ep.model_name : requestedModel;
+  // Validate model against allowed list if configured
+  if (allowedModels.length > 0 && !allowedModels.includes(requestedModel)) {
+    set.status = 400;
+    return { error: `Model "${requestedModel}" not allowed. Allowed: ${allowedModels.join(", ")}` };
+  }
   const start = Date.now();
   const isStream = !!body.stream;
   const reqMessages = (body.messages as BodyMessage[] | undefined) || [];
@@ -414,11 +593,14 @@ async function proxyAnthropic(gatewayKey: string, request: Request, set: { statu
   const existingSessionId = request.headers.get("x-session-id") || undefined;
   const sessionId = getOrCreateSession(ep.id, ep.provider_name || baseUrl, model, reqMessages, systemPrompt, existingSessionId);
 
+  // Notify WebSocket clients of new/updated session
+  notifySessionsChanged();
+
   // Add session ID to response headers
   set.headers["X-Session-Id"] = sessionId;
 
   try {
-    const upstream = await fetch(`${baseUrl}/messages`, {
+    const upstream = await fetchWithTimeout(`${baseUrl}/messages`, {
       method: "POST",
       headers: {
         "x-api-key": ep.api_key,
@@ -433,82 +615,72 @@ async function proxyAnthropic(gatewayKey: string, request: Request, set: { statu
       set.headers["Content-Type"] = "text/event-stream";
       set.headers["Cache-Control"] = "no-cache";
       set.headers["X-Accel-Buffering"] = "no";
-      const upstreamBody = upstream.body;
-      const stream = new ReadableStream({
-        async start(controller) {
-          const reader = upstreamBody.getReader();
-          let buffer = "";
-          let assistantText = "";
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              const chunk = new TextDecoder().decode(value);
-              buffer += chunk;
-              controller.enqueue(value);
-            }
-            let usage: UsageInfo = { inputTokens: 0, outputTokens: 0, cacheHitTokens: 0, cacheMissTokens: 0 };
-            let thinkingText = "";
-            let responseModel = "";
-            let stopReason = "";
-            const toolBlocksByIndex = new Map<number, { id?: string; name: string; jsonInput: string }>();
-            for (const line of buffer.split("\n")) {
-              if (line.startsWith("data: ")) {
-                try {
-                  const j = JSON.parse(line.slice(6));
-                  if (j.usage) {
-                    usage = {
-                      inputTokens: j.usage.input_tokens || 0,
-                      outputTokens: j.usage.output_tokens || 0,
-                      cacheHitTokens: j.usage.prompt_cache_hit_tokens || 0,
-                      cacheMissTokens: j.usage.prompt_cache_miss_tokens || 0,
-                    };
-                  }
-                  if (j.type === "message_start" && j.message?.model && !responseModel) {
-                    responseModel = j.message.model;
-                  }
-                  if (j.type === "message_delta" && j.delta?.stop_reason) {
-                    stopReason = j.delta.stop_reason;
-                  }
-                  if (j.type === "content_block_start" && j.content_block?.type === "tool_use") {
-                    toolBlocksByIndex.set(j.index, { id: j.content_block.id, name: j.content_block.name, jsonInput: "" });
-                  }
-                  if (j.type === "content_block_delta" && j.delta?.text) {
-                    assistantText += j.delta.text;
-                  }
-                  if (j.type === "content_block_delta" && j.delta?.thinking) {
-                    thinkingText += j.delta.thinking;
-                  }
-                  if (j.type === "content_block_delta" && j.delta?.type === "input_json_delta") {
-                    const existing = toolBlocksByIndex.get(j.index);
-                    if (existing) existing.jsonInput += j.delta.partial_json || "";
-                  }
-                } catch { /* */ }
+
+      return createProxyStream(upstream.body, upstream.status, set.headers, (buffer) => {
+        let usage: UsageInfo = { inputTokens: 0, outputTokens: 0, cacheHitTokens: 0, cacheMissTokens: 0 };
+        let assistantText = "";
+        let thinkingText = "";
+        let responseModel = "";
+        let stopReason = "";
+        const toolBlocksByIndex = new Map<number, { id?: string; name: string; jsonInput: string }>();
+        for (const line of buffer.split("\n")) {
+          // Tolerate both "data: {...}" and "data:{...}" (see OpenAI branch above).
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trimStart();
+          if (!payload || payload === "[DONE]") continue;
+          {
+            try {
+              const j = JSON.parse(payload);
+              if (j.usage) {
+                usage = {
+                  inputTokens: j.usage.input_tokens || 0,
+                  outputTokens: j.usage.output_tokens || 0,
+                  // Support both Anthropic-standard names (cache_read_input_tokens)
+                  // and OpenAI-style names (prompt_cache_hit_tokens) that some
+                  // Anthropic-format-compatible upstreams (e.g. Kimi k3) emit.
+                  cacheHitTokens: j.usage.cache_read_input_tokens ?? j.usage.prompt_cache_hit_tokens ?? 0,
+                  cacheMissTokens: j.usage.cache_creation_input_tokens ?? j.usage.prompt_cache_miss_tokens ?? 0,
+                };
               }
-            }
-            const toolCalls: ToolCallInfo[] = [...toolBlocksByIndex.values()].map((tb) => {
-              let input: Record<string, unknown> | undefined;
-              try { input = tb.jsonInput ? JSON.parse(tb.jsonInput) : undefined; } catch { input = { raw: tb.jsonInput }; }
-              return { id: tb.id, name: tb.name, input };
-            });
-            const cost = calcCost(ep, usage);
-            const totalTokens = usage.inputTokens + usage.outputTokens;
-            logRequest(ep.provider_name, model, upstream.status, Date.now() - start, usage, cost, sessionId, buffer, JSON.stringify(body));
-            finalizeSession(sessionId, {
-              text: assistantText,
-              thinking: thinkingText || undefined,
-              model: responseModel || (model as string),
-              stop_reason: stopReason,
-              tool_calls: toolCalls.length ? toolCalls : undefined,
-              usage: { input_tokens: usage.inputTokens, output_tokens: usage.outputTokens, cache_read_input_tokens: usage.cacheHitTokens, cache_creation_input_tokens: usage.cacheMissTokens },
-            }, totalTokens, Date.now() - start);
-          } finally {
-            reader.releaseLock();
-            controller.close();
+              if (j.type === "message_start" && j.message?.model && !responseModel) {
+                responseModel = j.message.model;
+              }
+              if (j.type === "message_delta" && j.delta?.stop_reason) {
+                stopReason = j.delta.stop_reason;
+              }
+              if (j.type === "content_block_start" && j.content_block?.type === "tool_use") {
+                toolBlocksByIndex.set(j.index, { id: j.content_block.id, name: j.content_block.name, jsonInput: "" });
+              }
+              if (j.type === "content_block_delta" && j.delta?.text) {
+                assistantText += j.delta.text;
+              }
+              if (j.type === "content_block_delta" && j.delta?.thinking) {
+                thinkingText += j.delta.thinking;
+              }
+              if (j.type === "content_block_delta" && j.delta?.type === "input_json_delta") {
+                const existing = toolBlocksByIndex.get(j.index);
+                if (existing) existing.jsonInput += j.delta.partial_json || "";
+              }
+            } catch { /* skip unparseable lines */ }
           }
-        },
-      });
-      return new Response(stream, { status: upstream.status, headers: set.headers });
+        }
+        const toolCalls: ToolCallInfo[] = [...toolBlocksByIndex.values()].map((tb) => {
+          let input: Record<string, unknown> | undefined;
+          try { input = tb.jsonInput ? JSON.parse(tb.jsonInput) : undefined; } catch { input = { raw: tb.jsonInput }; }
+          return { id: tb.id, name: tb.name, input };
+        });
+        const cost = calcCost(ep, usage);
+        const totalTokens = usage.inputTokens + usage.outputTokens;
+        logRequest(ep.provider_name, model, upstream.status, Date.now() - start, usage, cost, sessionId, buffer, JSON.stringify(body));
+        finalizeSession(sessionId, {
+          text: assistantText,
+          thinking: thinkingText || undefined,
+          model: responseModel || (model as string),
+          stop_reason: stopReason,
+          tool_calls: toolCalls.length ? toolCalls : undefined,
+          usage: { input_tokens: usage.inputTokens, output_tokens: usage.outputTokens, cache_read_input_tokens: usage.cacheHitTokens, cache_creation_input_tokens: usage.cacheMissTokens },
+        }, totalTokens, Date.now() - start);
+      }, "Anthropic");
     }
 
     const text = await upstream.text();
@@ -525,8 +697,8 @@ async function proxyAnthropic(gatewayKey: string, request: Request, set: { statu
       usage = {
         inputTokens: j.usage?.input_tokens || 0,
         outputTokens: j.usage?.output_tokens || 0,
-        cacheHitTokens: j.usage?.prompt_cache_hit_tokens || 0,
-        cacheMissTokens: j.usage?.prompt_cache_miss_tokens || 0,
+        cacheHitTokens: j.usage?.cache_read_input_tokens ?? j.usage?.prompt_cache_hit_tokens ?? 0,
+        cacheMissTokens: j.usage?.cache_creation_input_tokens ?? j.usage?.prompt_cache_miss_tokens ?? 0,
       };
       // Anthropic content is an array of blocks: [{type:"text",...}, {type:"thinking",...}, {type:"tool_use",...}]
       const blocks = j.content as Array<{ type: string; text?: string; thinking?: string; id?: string; name?: string; input?: Record<string, unknown> }> | undefined;
@@ -558,8 +730,9 @@ async function proxyAnthropic(gatewayKey: string, request: Request, set: { statu
     set.headers["Content-Type"] = "application/json";
     return text;
   } catch (err: unknown) {
-    set.status = 502;
-    return { error: `Upstream error: ${err instanceof Error ? err.message : String(err)}` };
+    const isTimeout = err instanceof DOMException && err.name === "AbortError";
+    set.status = isTimeout ? 504 : 502;
+    return { error: isTimeout ? "Upstream request timed out" : `Upstream error: ${err instanceof Error ? err.message : String(err)}` };
   }
 }
 
@@ -584,6 +757,8 @@ const app = new Elysia()
   .use(endpointsRoutes)
   .use(usageRoutes)
   .use(authRoutes)
+  .use(keysRoutes)
+  .use(retentionRoutes)
   .get("/api/health", () => ({ status: "ok", time: new Date().toISOString() }))
   // Gateway proxy: external clients connect via /v1/*
   // OpenAI-compatible: POST /v1/chat/completions
@@ -605,35 +780,33 @@ const app = new Elysia()
     Object.assign(set.headers, proxySet.headers);
     return result;
   })
-  // GET /v1/models - List available models
+  // GET /v1/models - List every model this key is allowed to access
   .get("/v1/models", ({ request, set }) => {
-    const gatewayKey = request.headers.get("x-api-key") || "";
-    const ep = lookupEndpoint(gatewayKey);
-    if (!ep) {
+    // Accept both auth styles: Anthropic SDKs send x-api-key, OpenAI SDKs send Bearer.
+    const gatewayKey =
+      request.headers.get("x-api-key") ||
+      (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
+    const modelIds = listModelsForKey(gatewayKey);
+    if (!modelIds) {
       set.status = 401;
       return { error: "Invalid or disabled API key" };
     }
-    // Return the model configured for this endpoint
+    const data = modelIds.map((id) => ({
+      id,
+      type: "model",
+      created_at: "2024-01-01T00:00:00Z",
+      display_name: id,
+    }));
     return {
-      data: [{
-        id: ep.model_name,
-        type: "model",
-        created_at: "2024-01-01T00:00:00Z",
-        display_name: ep.model_name,
-      }],
+      data,
       has_more: false,
-      first_id: ep.model_name,
-      last_id: ep.model_name,
+      first_id: data[0]?.id || "",
+      last_id: data[data.length - 1]?.id || "",
     };
   })
   // POST /anthropic/v1/messages/count_tokens - Count tokens in a message
   .post("/anthropic/v1/messages/count_tokens", async ({ request, set }) => {
     const gatewayKey = request.headers.get("x-api-key") || "";
-    const ep = lookupEndpoint(gatewayKey);
-    if (!ep) {
-      set.status = 401;
-      return { error: "Invalid or disabled API key" };
-    }
 
     let body: Record<string, unknown>;
     try {
@@ -643,12 +816,19 @@ const app = new Elysia()
       return { error: "Invalid JSON body" };
     }
 
+    const epResult = resolveGateway(gatewayKey, typeof body.model === "string" ? body.model : undefined);
+    if (!epResult.ok) {
+      set.status = epResult.status;
+      return { error: epResult.error };
+    }
+    const ep = epResult.ep;
+
     const baseUrl = ep.endpoint_url.replace(/\/+$/, "");
     const model = (body.model || ep.model_name) as string;
 
     try {
       // Proxy to upstream count_tokens endpoint
-      const upstream = await fetch(`${baseUrl}/messages/count_tokens`, {
+      const upstream = await fetchWithTimeout(`${baseUrl}/messages/count_tokens`, {
         method: "POST",
         headers: {
           "x-api-key": ep.api_key,
@@ -698,7 +878,22 @@ if (isProduction) {
     set.headers["Content-Type"] = "text/html; charset=utf-8";
     return Bun.file(distDir + "index.html");
   });
-  app.listen({ port: PORT, hostname: HOST });
+
+  Bun.serve({
+    port: PORT,
+    hostname: HOST,
+    websocket: {
+      open(ws) { if (ws.data.kind === "app") wsRegister(ws); },
+      close(ws) { if (ws.data.kind === "app") wsUnregister(ws); },
+    },
+    fetch(req, server) {
+      const url = new URL(req.url);
+      if (url.pathname === "/ws" && req.headers.get("Upgrade")?.toLowerCase() === "websocket") {
+        if (server.upgrade(req, { data: { kind: "app" } })) return;
+      }
+      return app.fetch(req);
+    },
+  });
   console.log(`🚀 Pulse AI Gateway running on http://${HOST}:${PORT} (production)`);
 } else {
   // === Dev: Bun.serve with HMR proxy ===
@@ -706,26 +901,40 @@ if (isProduction) {
     port: PORT,
     websocket: {
       open(ws) {
-        const target = new WebSocket(`ws://localhost:${PORT + 1}/_bun/hmr`);
-        (ws as unknown as { data: { target: WebSocket } }).data = { target };
-        target.addEventListener("message", (e) => {
-          if (ws.readyState === WebSocket.OPEN) ws.send(e.data);
-        });
-        target.addEventListener("close", () => ws.close());
+        const data = ws.data as { kind?: string; target?: WebSocket } | undefined;
+        if (data?.kind === "app") {
+          wsRegister(ws);
+        } else {
+          const target = new WebSocket(`ws://localhost:${PORT + 1}/_bun/hmr`);
+          (ws as unknown as { data: { target: WebSocket } }).data = { target };
+          target.addEventListener("message", (e) => {
+            if (ws.readyState === WebSocket.OPEN) ws.send(e.data);
+          });
+          target.addEventListener("close", () => ws.close());
+        }
       },
       message(ws, message) {
-        const data = ws.data as { target: WebSocket } | undefined;
+        const data = ws.data as { kind?: string; target?: WebSocket } | undefined;
+        if (data?.kind === "app") return;
         if (data?.target && data.target.readyState === WebSocket.OPEN) {
           data.target.send(message);
         }
       },
       close(ws) {
-        const data = ws.data as { target: WebSocket } | undefined;
-        data?.target?.close();
+        const data = ws.data as { kind?: string; target?: WebSocket } | undefined;
+        if (data?.kind === "app") {
+          wsUnregister(ws);
+        } else {
+          data?.target?.close();
+        }
       },
     },
     fetch(req, server) {
       const url = new URL(req.url);
+      // App WebSocket
+      if (url.pathname === "/ws" && req.headers.get("Upgrade")?.toLowerCase() === "websocket") {
+        if (server.upgrade(req, { data: { kind: "app" } })) return;
+      }
       // Proxy /_bun/hmr WebSocket upgrade to HMR server
       if (url.pathname === "/_bun/hmr" && req.headers.get("Upgrade")?.toLowerCase() === "websocket") {
         if (server.upgrade(req)) return;

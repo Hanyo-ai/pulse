@@ -7,26 +7,6 @@ interface UserManagementProps {
   currentUser: User;
 }
 
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "8px 12px",
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-sm)",
-  font: "13px var(--font)",
-  background: "var(--bg)",
-  color: "var(--fg)",
-  outline: "none",
-  boxSizing: "border-box",
-};
-
-const labelStyle: React.CSSProperties = {
-  fontSize: "12px",
-  fontWeight: 600,
-  color: "var(--muted)",
-  display: "block",
-  marginBottom: "4px",
-};
-
 export default function UserManagement({ token, currentUser }: UserManagementProps) {
   const { t } = useTranslation();
   const [users, setUsers] = useState<User[]>([]);
@@ -149,7 +129,7 @@ export default function UserManagement({ token, currentUser }: UserManagementPro
   });
 
   return (
-    <section className="section active" style={{ overflowY: "auto", padding: "24px" }}>
+    <section className="section active page">
       <div
         style={{
           display: "flex",
@@ -178,7 +158,7 @@ export default function UserManagement({ token, currentUser }: UserManagementPro
           <tbody>
             {users.length === 0 ? (
               <tr>
-                <td colSpan={5} style={{ textAlign: "center", color: "var(--muted)", padding: "24px" }}>{t("users.noUsers")}</td>
+                <td colSpan={5} className="empty-state">{t("users.noUsers")}</td>
               </tr>
             ) : users.map((user) => (
               <tr key={user.id}>
@@ -189,15 +169,14 @@ export default function UserManagement({ token, currentUser }: UserManagementPro
                     {user.role === "admin" ? t("role.admin") : t("role.user")}
                   </span>
                 </td>
-                <td className="mono">{user.created_at ? new Date(user.created_at).toLocaleDateString("zh-CN") : "—"}</td>
+                <td className="mono">{user.created_at ? new Date(user.created_at).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" }) : "—"}</td>
                 <td>
                   <button className="btn btn-sm" style={{ marginRight: "6px" }} onClick={() => handleEdit(user)}>
                     {t("users.edit")}
                   </button>
                   {user.id !== currentUser.id && (
                     <button
-                      className="btn btn-sm"
-                      style={{ color: "var(--red)", borderColor: "var(--red)" }}
+                      className="btn btn-sm btn-danger"
                       onClick={() => handleDelete(user)}
                     >
                       {t("users.delete")}
@@ -211,53 +190,33 @@ export default function UserManagement({ token, currentUser }: UserManagementPro
       </div>
 
       {showModal && (
-        <div
-          style={{
-            position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            zIndex: 500,
-          }}
-          onClick={() => setShowModal(false)}
-        >
+        <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div
-            className="card"
-            style={{ width: "420px", maxWidth: "92%" }}
+            className="card modal"
+            style={{ width: 420 }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "20px" }}>
-              <h3 style={{ fontSize: "15px", fontWeight: 650 }}>{editingUser ? t("users.editUser") : t("users.newUser")}</h3>
-              <button
-                onClick={() => setShowModal(false)}
-                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: "18px", lineHeight: 1 }}
-              >
-                ×
-              </button>
+            <div className="modal-header">
+              <h3>{editingUser ? t("users.editUser") : t("users.newUser")}</h3>
+              <button className="modal-close" onClick={() => setShowModal(false)}>×</button>
             </div>
 
-            {error && (
-              <div style={{
-                padding: "10px 14px", borderRadius: "var(--radius-sm)",
-                background: "oklch(95% 0.04 25)", color: "var(--red)",
-                fontSize: "13px", marginBottom: "16px",
-              }}>
-                {error}
-              </div>
-            )}
+            {error && <div className="alert alert-error" style={{ marginBottom: 16 }}>{error}</div>}
 
             <form onSubmit={handleSubmit}>
               <div style={{ marginBottom: "14px" }}>
-                <label style={labelStyle}>{t("users.colUsername")}</label>
+                <label className="field-label">{t("users.colUsername")}</label>
                 <input
                   type="text"
                   value={formData.username}
                   onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                   disabled={!!editingUser}
                   required
-                  style={inputStyle}
+                  className="input"
                 />
               </div>
               <div style={{ marginBottom: "14px" }}>
-                <label style={labelStyle}>
+                <label className="field-label">
                   {t("users.password")} {editingUser ? t("users.passwordHint") : ""}
                 </label>
                 <input
@@ -265,31 +224,31 @@ export default function UserManagement({ token, currentUser }: UserManagementPro
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   required={!editingUser}
-                  style={inputStyle}
+                  className="input"
                 />
               </div>
               <div style={{ marginBottom: "14px" }}>
-                <label style={labelStyle}>{t("users.colDisplayName")}</label>
+                <label className="field-label">{t("users.colDisplayName")}</label>
                 <input
                   type="text"
                   value={formData.display_name}
                   onChange={(e) => setFormData({ ...formData, display_name: e.target.value })}
-                  style={inputStyle}
+                  className="input"
                 />
               </div>
               <div style={{ marginBottom: "14px" }}>
-                <label style={labelStyle}>{t("users.colRole")}</label>
+                <label className="field-label">{t("users.colRole")}</label>
                 <select
                   value={formData.role}
                   onChange={(e) => setFormData({ ...formData, role: e.target.value as "admin" | "user" })}
-                  style={inputStyle}
+                  className="input"
                 >
                   <option value="user">{t("role.user")}</option>
                   <option value="admin">{t("role.admin")}</option>
                 </select>
               </div>
-              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "6px" }}>
-                <button type="button" className="btn" style={{ border: "1px solid var(--border)" }} onClick={() => setShowModal(false)}>
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 6 }}>
+                <button type="button" className="btn" onClick={() => setShowModal(false)}>
                   {t("users.cancel")}
                 </button>
                 <button type="submit" className="btn btn-primary">

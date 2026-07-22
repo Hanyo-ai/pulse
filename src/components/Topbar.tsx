@@ -21,6 +21,7 @@ export function Topbar({ activeSection, onNavigate, onToggleSidebar, activeSessi
       case "session-monitor": return t("topbar.sessionMonitor");
       case "logs": return t("topbar.auditLogs");
       case "endpoints": return t("topbar.endpoints");
+      case "keys": return t("topbar.keys");
       case "usage": return t("topbar.usage");
       case "users": return t("topbar.users");
       case "login": return t("topbar.login");
@@ -75,18 +76,7 @@ export function Topbar({ activeSection, onNavigate, onToggleSidebar, activeSessi
           <span className="val">{monthlyCost}</span>
           <span className="lbl">{t("topbar.monthlyCost")}</span>
         </div>
-        <button
-          onClick={onLogout}
-          style={{
-            padding: "0.5rem 1rem",
-            fontSize: "0.875rem",
-            cursor: "pointer",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius-sm)",
-            background: "var(--bg)",
-            color: "var(--fg)",
-          }}
-        >
+        <button onClick={onLogout} className="btn btn-sm">
           {t("topbar.logout")}
         </button>
       </div>

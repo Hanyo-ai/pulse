@@ -88,7 +88,7 @@ function SessionBar({ sessions, activeSessionId, onSelect }: SessionBarProps) {
                 </div>
                 <span className="si-time">
                   {s.updated_at
-                    ? new Date(s.updated_at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
+                    ? new Date(s.updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
                     : ""}
                 </span>
               </div>
@@ -417,9 +417,13 @@ function ChatPanel({ messages, session }: ChatPanelProps) {
     return (
       <div className="chat-panel">
         <div className="chat-empty">
-          {t("session.emptyHint1")}
-          <br />
-          {t("session.emptyHint2")}
+          <div style={{ fontSize: "2.5rem", marginBottom: "0.8rem", opacity: 0.4 }}>⚡</div>
+          <div style={{ fontSize: "1rem", fontWeight: 600, color: "var(--fg)", marginBottom: "0.3rem" }}>
+            {t("session.emptyHint1")}
+          </div>
+          <div style={{ color: "var(--muted)" }}>
+            {t("session.emptyHint2")}
+          </div>
         </div>
       </div>
     );
@@ -428,7 +432,10 @@ function ChatPanel({ messages, session }: ChatPanelProps) {
   if (messages.length === 0) {
     return (
       <div className="chat-panel">
-        <div className="chat-empty">{t("session.noMessages")}</div>
+        <div className="chat-empty">
+          <div style={{ fontSize: "2.5rem", marginBottom: "0.6rem", opacity: 0.4 }}>💬</div>
+          {t("session.noMessages")}
+        </div>
       </div>
     );
   }

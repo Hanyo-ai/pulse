@@ -5,9 +5,12 @@ import { Topbar } from "./components/Topbar";
 import { SessionMonitor } from "./components/SessionMonitor";
 import { AuditLogs } from "./components/AuditLogs";
 import { Endpoints } from "./components/Endpoints";
+import { Keys } from "./components/Keys";
 import { Usage } from "./components/Usage";
 import { LoginPage } from "./components/LoginPage";
 import UserManagement from "./components/UserManagement";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { useWebSocket } from "./useWebSocket";
 import type { Section, Session, Message, User } from "./types";
 import { useTranslation } from "./i18n";
 
@@ -67,58 +70,42 @@ export function App() {
 
   // Track whether we've done the initial fetch
   const initialFetchDone = useRef(false);
-  // Keep a ref so the polling closure can read the latest activeSessionId
+  // Keep a ref so the WS callback can read the latest activeSessionId
   const activeSessionIdRef = useRef<string>("");
   // Track if user manually selected a session (to prevent auto-switching)
   const userSelectedSession = useRef(false);
+  const handleLogoutRef = useRef<() => void>(() => {});
 
-  // Poll sessions every 3 seconds
-  useEffect(() => {
+  const fetchSessions = useCallback(() => {
     if (!token) return;
-
-    const fetchSessions = () => {
-      fetch("/api/sessions", { headers: authHeaders(token) })
-        .then((r) => {
-          if (r.status === 401) {
-            handleLogout();
-            return null;
-          }
-          return r.json();
-        })
-        .then((data: Session[] | null) => {
-          if (!data) return;
-          setSessions(data);
-          if (!initialFetchDone.current && data.length > 0) {
-            // Initial load: select the most recent live session, or the first one
-            const live = data.find((s) => s.status === "live");
-            const target = live ?? data[0]!;
-            setActiveSessionId(target.id);
-            activeSessionIdRef.current = target.id;
-            initialFetchDone.current = true;
-          } else if (initialFetchDone.current && !userSelectedSession.current) {
-            // Auto-follow: only switch to new live sessions if user hasn't made a manual selection
-            const live = data.find((s) => s.status === "live");
-            if (live && live.id !== activeSessionIdRef.current) {
-              setActiveSessionId(live.id);
-              activeSessionIdRef.current = live.id;
+    // First clean up stale sessions, then fetch
+    fetch("/api/sessions/cleanup-stale", { method: "POST", headers: authHeaders(token) })
+      .catch(() => {}) // ignore errors from cleanup
+      .finally(() => {
+        fetch("/api/sessions", { headers: authHeaders(token) })
+          .then((r) => {
+            if (r.status === 401) { handleLogoutRef.current(); return null; }
+            return r.json();
+          })
+          .then((data: Session[] | null) => {
+            if (!data) return;
+            setSessions(data);
+            if (!initialFetchDone.current && data.length > 0) {
+              // Pick the most recently updated session, falling back to live only if no user selection
+              const target = data[0]!;
+              setActiveSessionId(target.id);
+              activeSessionIdRef.current = target.id;
+              initialFetchDone.current = true;
+            } else if (initialFetchDone.current && !userSelectedSession.current) {
+              const live = data.find((s) => s.status === "live");
+              if (live && live.id !== activeSessionIdRef.current) {
+                setActiveSessionId(live.id);
+                activeSessionIdRef.current = live.id;
+              }
             }
-          }
-        })
-        .catch(console.error);
-    };
-
-    fetchSessions(); // initial fetch
-    const interval = setInterval(fetchSessions, 3000);
-    return () => clearInterval(interval);
-  }, [token]);
-
-  // Reset initialFetchDone when token changes (logout)
-  useEffect(() => {
-    if (!token) {
-      initialFetchDone.current = false;
-      activeSessionIdRef.current = "";
-      userSelectedSession.current = false;
-    }
+          })
+          .catch(console.error);
+      });
   }, [token]);
 
   const fetchMessages = useCallback(
@@ -132,13 +119,31 @@ export function App() {
     [token]
   );
 
-  // Poll messages every 2 seconds when viewing a session
+  // WebSocket: replaces polling for both sessions and messages
+  useWebSocket((event) => {
+    if (event.type === "sessions_updated") {
+      fetchSessions();
+    } else if (event.type === "messages_updated") {
+      if (event.sessionId === activeSessionIdRef.current) {
+        fetchMessages(event.sessionId);
+      }
+    }
+  });
+
+  // Initial fetch on login
   useEffect(() => {
-    if (!activeSessionId || !token) return;
-    fetchMessages(activeSessionId);
-    const interval = setInterval(() => fetchMessages(activeSessionId), 2000);
-    return () => clearInterval(interval);
-  }, [activeSessionId, fetchMessages, token]);
+    if (token) {
+      initialFetchDone.current = false;
+      fetchSessions();
+    }
+  }, [token, fetchSessions]);
+
+  // Fetch messages when active session changes
+  useEffect(() => {
+    if (activeSessionId && token) {
+      fetchMessages(activeSessionId);
+    }
+  }, [activeSessionId, token, fetchMessages]);
 
   const handleSelectSession = (id: string) => {
     setActiveSessionId(id);
@@ -167,6 +172,9 @@ export function App() {
     setMessages([]);
   };
 
+  // Keep ref in sync for use in fetchSessions
+  handleLogoutRef.current = handleLogout;
+
   const navigate = (s: Section) => {
     setSection(s);
     setSidebarOpen(false);
@@ -192,6 +200,7 @@ export function App() {
       />
 
       <main className="main">
+        <ErrorBoundary>
         <Topbar
           activeSection={section}
           onNavigate={navigate}
@@ -213,14 +222,16 @@ export function App() {
           )}
           {section === "logs" && <AuditLogs token={token} />}
           {isAdmin && section === "endpoints" && <Endpoints token={token} />}
+          {isAdmin && section === "keys" && <Keys token={token} />}
           {section === "usage" && <Usage token={token} />}
           {isAdmin && section === "users" && (
             <UserManagement token={token} currentUser={user} />
           )}
-          {!isAdmin && (section === "endpoints" || section === "users") && (
+          {!isAdmin && (section === "endpoints" || section === "keys" || section === "users") && (
             <div style={{ padding: "2rem", color: "var(--muted)" }}>{t("app.noAccess")}</div>
           )}
         </div>
+        </ErrorBoundary>
       </main>
 
       <nav className="mobile-nav">
@@ -244,6 +255,18 @@ export function App() {
               <path d="M10 1.5v3m0 11v3M1.5 10h3m11 0h3" />
             </svg>
             {t("nav.endpoints")}
+          </button>
+        )}
+        {isAdmin && (
+          <button
+            className={section === "keys" ? "active" : ""}
+            onClick={() => navigate("keys")}
+          >
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6">
+              <circle cx="6.5" cy="10" r="4" />
+              <path d="M10.5 10H19m-3 0v3.5m-3.5-3.5v2.5" />
+            </svg>
+            {t("nav.keys")}
           </button>
         )}
         <button
