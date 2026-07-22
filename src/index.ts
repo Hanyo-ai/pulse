@@ -346,6 +346,11 @@ function finalizeSession(
 }
 
 // ── Shared stream proxy helper ──
+// Uses ReadableStream.tee() to split the upstream body:
+//   - clientStream → returned directly to the client (zero JS overhead, native pass-through)
+//   - logStream   → read asynchronously in the background for logging/finalization
+// This avoids the "incomplete chunked read" error caused by manual data pumping
+// through a custom ReadableStream.
 function createProxyStream(
   upstreamBody: ReadableStream<Uint8Array>,
   upstreamStatus: number,
@@ -353,51 +358,28 @@ function createProxyStream(
   onFinalize: (buffer: string) => void,
   logLabel = "Stream",
 ): Response {
-  let buffer = "";
-  let streamFinalized = false;
-  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  const [clientStream, logStream] = upstreamBody.tee();
 
-  function finalizeStream() {
-    if (streamFinalized) return;
-    streamFinalized = true;
-    try { onFinalize(buffer); } catch (e) { console.error(`${logLabel} finalize error:`, e); }
-  }
-
-  const stream = new ReadableStream({
-    async start(controller) {
-      reader = upstreamBody.getReader();
-      let readError: unknown = null;
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = new TextDecoder().decode(value);
-          buffer += chunk;
-          controller.enqueue(value);
-        }
-      } catch (err) {
-        readError = err;
-        console.error(`${logLabel} read error:`, err);
-      } finally {
-        finalizeStream();
-        try { reader.releaseLock(); } catch { /* ignore */ }
-        if (readError) {
-          // Propagate the error so the client sees a proper failure
-          // instead of "incomplete chunked read" from a truncated stream.
-          try { controller.error(readError as Error); } catch { /* ignore */ }
-        } else {
-          try { controller.close(); } catch { /* ignore */ }
-        }
+  // Background: accumulate logStream for logging (doesn't block the client)
+  (async () => {
+    const reader = logStream.getReader();
+    let buffer = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += new TextDecoder().decode(value);
       }
-    },
-    cancel(reason) {
-      console.warn(`${logLabel} cancelled:`, reason);
-      finalizeStream();
-      try { reader?.releaseLock(); } catch { /* ignore */ }
-    },
-  });
+    } catch (e) {
+      console.error(`${logLabel} tee read error:`, e);
+    } finally {
+      try { reader.releaseLock(); } catch { /* ignore */ }
+      // Always finalize — even on error we want partial buffer for debugging
+      try { onFinalize(buffer); } catch (e) { console.error(`${logLabel} finalize error:`, e); }
+    }
+  })();
 
-  return new Response(stream, { status: upstreamStatus, headers: setHeaders });
+  return new Response(clientStream, { status: upstreamStatus, headers: setHeaders });
 }
 
 async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: number; headers: Record<string, string> }) {
