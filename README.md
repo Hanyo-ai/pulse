@@ -118,8 +118,10 @@ x-api-key: <gateway_key>
 | GET | `/api/sessions/:id/messages` | Session messages |
 | GET / POST / PUT / DELETE | `/api/endpoints[/:id]` | Provider endpoint CRUD |
 | POST | `/api/endpoints/test` | Test an endpoint config without saving |
+| GET / POST / PUT / DELETE | `/api/keys[/:id]` | Gateway API key CRUD (admin) |
 | GET | `/api/logs?provider=…&status=…` | Query audit logs with filters |
 | GET | `/api/usage/stats` · `by-model` · `trend` | Usage analytics |
+| GET | `/api/retention` | Log retention config & prune status |
 | GET | `/api/health` | Service health |
 
 </details>
@@ -147,8 +149,13 @@ x-api-key: <gateway_key>
 | `HOST` | `0.0.0.0` | Bind address (`pulse run` defaults to `127.0.0.1`) |
 | `DB_PATH` | `pulse.db` | SQLite database file path |
 | `PULSE_NO_AUTH` | — | Set to `1` to disable login (single-user / local installs) |
+| `PULSE_LOG_RETENTION_DAYS` | `7` | Days to retain request logs (sessions/messages unaffected) |
 
 Configure upstream providers in the dashboard's **Endpoints** tab: upstream URL, upstream API key, gateway key (what clients send), default model, and per-million-token pricing.
+
+Manage gateway API keys in the **Keys** tab — generate `sgw_`-prefixed keys, restrict them to specific models, and enable/disable per key.
+
+PULSE now pushes real-time updates to the dashboard via **WebSocket**: session list refreshes and live message streaming happen automatically without polling.
 
 > ⚠️ **Don't put `process.env.NODE_ENV` in `bunfig.toml`'s `[define]` table.** Bun applies `[define]` at runtime as well as during bundling, so a line like `"process.env.NODE_ENV" = "\"development\""` silently overrides `NODE_ENV=production` from systemd / your shell, leaving the server in dev mode. If you need to force dev for bundling only, pass `--define` on the `bun build` command line.
 
