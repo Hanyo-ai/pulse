@@ -30,6 +30,24 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = U
   }
 }
 
+// ── Forward safe headers from original request to upstream ──
+function forwardHeaders(originalHeaders: Headers, overrides: Record<string, string>): Record<string, string> {
+  const result: Record<string, string> = { ...overrides };
+  // Forward standard headers that identify the client
+  const safeHeaders = ["accept", "user-agent"];
+  for (const name of safeHeaders) {
+    const val = originalHeaders.get(name);
+    if (val) result[name] = val;
+  }
+  // Forward X-Stainless-* telemetry headers (Anthropic SDK identity)
+  for (const [name, val] of originalHeaders.entries()) {
+    if (name.toLowerCase().startsWith("x-stainless-") && val) {
+      result[name] = val;
+    }
+  }
+  return result;
+}
+
 // ── Gateway proxy helpers ──
 interface EndpointRow {
   id: number;
@@ -427,7 +445,10 @@ async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: 
   try {
     const upstream = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
       method: "POST",
-      headers: { "Authorization": `Bearer ${ep.api_key}`, "Content-Type": "application/json" },
+      headers: forwardHeaders(request.headers, {
+        "Authorization": `Bearer ${ep.api_key}`,
+        "Content-Type": "application/json",
+      }),
       body: JSON.stringify({ ...body, model }),
     });
 
@@ -591,11 +612,11 @@ async function proxyAnthropic(gatewayKey: string, request: Request, set: { statu
   try {
     const upstream = await fetchWithTimeout(`${baseUrl}/messages`, {
       method: "POST",
-      headers: {
+      headers: forwardHeaders(request.headers, {
         "x-api-key": ep.api_key,
         "anthropic-version": request.headers.get("anthropic-version") || "2023-06-01",
         "Content-Type": "application/json",
-      },
+      }),
       body: JSON.stringify({ ...body, model }),
     });
 
@@ -816,11 +837,11 @@ const app = new Elysia()
       // Proxy to upstream count_tokens endpoint
       const upstream = await fetchWithTimeout(`${baseUrl}/messages/count_tokens`, {
         method: "POST",
-        headers: {
+        headers: forwardHeaders(request.headers, {
           "x-api-key": ep.api_key,
           "anthropic-version": request.headers.get("anthropic-version") || "2023-06-01",
           "Content-Type": "application/json",
-        },
+        }),
         body: JSON.stringify({ ...body, model }),
       });
 

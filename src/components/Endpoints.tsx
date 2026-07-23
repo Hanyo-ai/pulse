@@ -53,12 +53,43 @@ interface AddModalProps {
   token: string;
 }
 
+// ---- Provider presets ----
+// key convention: "A" = Anthropic-compatible API, "O" = OpenAI-compatible API
+interface ProviderPreset {
+  id: string;
+  label: string;
+  provider_name: string;
+  provider_key: string;
+  base_url: string;
+}
+
+const PROVIDER_PRESETS: ProviderPreset[] = [
+  { id: "kimi-code-oai",  label: "Kimi Code (OpenAI)",         provider_name: "kimi-code",    provider_key: "O", base_url: "https://api.kimi.com/coding/v1" },
+  { id: "kimi-code-ant",  label: "Kimi Code (Anthropic)",      provider_name: "kimi-code",    provider_key: "A", base_url: "https://api.kimi.com/coding/v1" },
+  { id: "deepseek-oai",   label: "DeepSeek (OpenAI)",         provider_name: "deepseek",     provider_key: "O", base_url: "https://api.deepseek.com" },
+  { id: "deepseek-ant",   label: "DeepSeek (Anthropic)",      provider_name: "deepseek",     provider_key: "A", base_url: "https://api.deepseek.com/anthropic" },
+  { id: "aicodemirror",   label: "AiCodeMirror (Anthropic)",  provider_name: "aicodemirror", provider_key: "A", base_url: "https://api.aicodemirror.com/api/claudecode/v1" },
+  { id: "openai",         label: "OpenAI",                    provider_name: "openai",       provider_key: "O", base_url: "https://api.openai.com/v1" },
+  { id: "anthropic",      label: "Anthropic",                 provider_name: "anthropic",    provider_key: "A", base_url: "https://api.anthropic.com" },
+];
+
 function AddModal({ onClose, onCreated, token }: AddModalProps) {
   const { t } = useTranslation();
   const [displayName, setDisplayName] = useState("");
   const [providerName, setProviderName] = useState("");
   const [providerKey, setProviderKey] = useState("");
   const [endpointUrl, setEndpointUrl] = useState("");
+  const [presetId, setPresetId] = useState("custom");
+
+  const applyPreset = (id: string) => {
+    setPresetId(id);
+    const preset = PROVIDER_PRESETS.find((p) => p.id === id);
+    if (preset) {
+      setProviderName(preset.provider_name);
+      setProviderKey(preset.provider_key);
+      setEndpointUrl(preset.base_url);
+    }
+  };
   const [modelName, setModelName] = useState("");
   const [extraModels, setExtraModels] = useState<string[]>([]);
   const [newModelInput, setNewModelInput] = useState("");
@@ -225,7 +256,22 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
           {error && <div className="alert alert-error">{error}</div>}
 
-          {/* Custom Display Name */}
+          {/* Provider preset selector */}
+          <div>
+            <label className="field-label">{t("ep.providerPreset")}</label>
+            <select
+              value={presetId}
+              onChange={(e) => applyPreset(e.target.value)}
+              className="input"
+            >
+              {PROVIDER_PRESETS.map((p) => (
+                <option key={p.id} value={p.id}>{p.label}</option>
+              ))}
+              <option value="custom">{t("ep.providerCustom")}</option>
+            </select>
+          </div>
+
+          {/* Custom Display Name (optional — falls back to provider name) */}
           <div>
             <label className="field-label">{t("ep.customName")}</label>
             <input
@@ -233,7 +279,6 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
               placeholder={t("ep.customNameHint")}
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              required
               className="input"
             />
           </div>
@@ -246,7 +291,7 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
                 type="text"
                 placeholder={t("ep.providerKeyIdHint")}
                 value={providerName}
-                onChange={(e) => setProviderName(e.target.value)}
+                onChange={(e) => { setProviderName(e.target.value); setPresetId("custom"); }}
                 required
                 className="input"
               />
@@ -257,7 +302,7 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
                 type="text"
                 placeholder={t("ep.providerKeyHint")}
                 value={providerKey}
-                onChange={(e) => setProviderKey(e.target.value.toUpperCase().slice(0, 3))}
+                onChange={(e) => { setProviderKey(e.target.value.toUpperCase().slice(0, 3)); setPresetId("custom"); }}
                 required
                 className="input"
               />
@@ -271,7 +316,7 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
               type="url"
               placeholder={t("ep.baseUrlHint")}
               value={endpointUrl}
-              onChange={(e) => setEndpointUrl(e.target.value)}
+              onChange={(e) => { setEndpointUrl(e.target.value); setPresetId("custom"); }}
               required
               className="input"
             />
@@ -678,7 +723,8 @@ function EditModal({ endpoint, onClose, onSaved, token }: EditModalProps) {
         ok: true,
         msg: t("ep.testSuccess", { latency: data.latency_ms, model: data.model_used }),
       });
-    } catch {
+    } catch (err) {
+      console.error("Test connection failed:", err);
       setTestResult({ ok: false, msg: t("ep.testNetworkError") });
     } finally {
       setTesting(false);
