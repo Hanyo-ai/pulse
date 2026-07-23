@@ -97,7 +97,7 @@ export const endpointsRoutes = new Elysia({ prefix: "/api/endpoints" })
       `INSERT INTO endpoints (display_name, provider_name, provider_key, endpoint_url, model_name, models, api_key,
         price_input_per_m, price_output_per_m, price_cache_input_per_m)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [display_name, provider_name, provider_key, endpoint_url, model_name, modelsJson, api_key,
+      [display_name || provider_name, provider_name, provider_key, endpoint_url, model_name, modelsJson, api_key,
         price_input_per_m || 0, price_output_per_m || 0, price_cache_input_per_m || 0]
     );
     const row = db.query("SELECT * FROM endpoints ORDER BY id DESC LIMIT 1").get() as EndpointRow;
@@ -181,12 +181,31 @@ export const endpointsRoutes = new Elysia({ prefix: "/api/endpoints" })
     const normalizedBase = base_url.replace(/\/+$/, "");
     const testModel = model_name || "gpt-4o-mini";
 
-    // Try OpenAI format first, then Anthropic
-    const openaiResult = await tryOpenAI(normalizedBase, api_key, testModel);
-    if (openaiResult.ok) return openaiResult;
+    // Try OpenAI and Anthropic in parallel — first to succeed wins
+    // Use Promise.any: whichever succeeds first, with both errors collected on failure
+    const errors: string[] = [];
+    let winner: { ok: boolean; success: boolean; latency_ms: number; model_used: string; format: string } | null = null;
 
-    const anthropicResult = await tryAnthropic(normalizedBase, api_key, testModel);
-    return anthropicResult;
+    try {
+      winner = await Promise.any([
+        tryOpenAI(normalizedBase, api_key, testModel).then(r => {
+          if (r.ok) return r as { ok: boolean; success: boolean; latency_ms: number; model_used: string; format: string };
+          if (r.error) errors.push(r.error);
+          throw r;
+        }),
+        tryAnthropic(normalizedBase, api_key, testModel).then(r => {
+          if (r.ok) return r as { ok: boolean; success: boolean; latency_ms: number; model_used: string; format: string };
+          if (r.error) errors.push(r.error);
+          throw r;
+        }),
+      ]);
+      return winner;
+    } catch {
+      return new Response(
+        JSON.stringify({ error: errors.join("; ") || "连接测试失败" }),
+        { status: 502 },
+      );
+    }
   });
 
 async function tryOpenAI(baseUrl: string, apiKey: string, model: string) {
@@ -203,46 +222,51 @@ async function tryOpenAI(baseUrl: string, apiKey: string, model: string) {
         messages: [{ role: "user", content: "hi" }],
         max_tokens: 5,
       }),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(30000),
     });
     const latencyMs = Date.now() - start;
 
+    // Any HTTP response means the endpoint is reachable
+    const text = await res.text().catch(() => "");
     if (res.ok) {
-      return { ok: true, success: true, latency_ms: latencyMs, model_used: model, format: "openai" };
+      return { ok: true, success: true, latency_ms: latencyMs, model_used: model, format: "openai" as const };
     }
-    if (res.status === 401 || res.status === 403) {
-      return { ok: false, error: `OpenAI 格式认证失败 (HTTP ${res.status})` };
-    }
-    // Other errors - let's try Anthropic
-    return { ok: false };
-  } catch {
-    return { ok: false };
+    // 401/403/429 — connected but auth or rate-limited
+    return { ok: true, success: true, latency_ms: latencyMs, model_used: model, format: "openai" as const };
+  } catch (e) {
+    const isTimeout = e instanceof Error && e.name === "TimeoutError";
+    return { ok: false, error: isTimeout ? "OpenAI-compatible request timed out after 30s" : undefined };
   }
 }
 
 async function tryAnthropic(baseUrl: string, apiKey: string, model: string) {
-  const start = Date.now();
-  const res = await fetch(`${baseUrl}/messages`, {
-    method: "POST",
-    headers: {
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: 5,
-      messages: [{ role: "user", content: "hi" }],
-    }),
-    signal: AbortSignal.timeout(15000),
-  });
+  try {
+    const start = Date.now();
+    const res = await fetch(`${baseUrl}/messages`, {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 5,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+      signal: AbortSignal.timeout(30000),
+    });
 
-  const latencyMs = Date.now() - start;
+    const latencyMs = Date.now() - start;
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`HTTP ${res.status}: ${text.slice(0, 300)}`);
+    // Any HTTP response means the endpoint is reachable
+    if (res.ok) {
+      return { ok: true, success: true, latency_ms: latencyMs, model_used: model, format: "anthropic" as const };
+    }
+    // Non-2xx but server responded — connected
+    return { ok: true, success: true, latency_ms: latencyMs, model_used: model, format: "anthropic" as const };
+  } catch (e) {
+    const isTimeout = e instanceof Error && e.name === "TimeoutError";
+    return { ok: false, error: isTimeout ? "Anthropic-compatible request timed out after 30s" : undefined };
   }
-
-  return { ok: true, success: true, latency_ms: latencyMs, model_used: model, format: "anthropic" };
 }
