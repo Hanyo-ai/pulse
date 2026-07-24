@@ -40,7 +40,17 @@ Requires [Bun](https://bun.sh) **>= 1.2**.
 ### Install from npm (single-user / local)
 
 ```bash
+# npm
+npm install -g @hanyo_ai/pulse
+
+# bun
 bun install -g @hanyo_ai/pulse
+
+# yarn / pnpm
+yarn global add @hanyo_ai/pulse
+pnpm add -g @hanyo_ai/pulse
+
+# then run
 pulse run
 ```
 
