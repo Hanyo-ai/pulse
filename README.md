@@ -6,6 +6,8 @@
 
 Watch agent conversations unfold live — `system` prompts, `user` messages, `assistant` responses, `tool_result` returns — elegantly visualized in a single dashboard. A self-hosted AI gateway powered by Bun, OpenAI & Anthropic compatible, with cost tracking and audit logs built in.
 
+<img src="./assets/pulse.jpg" alt="PULSE - AI Agent Observability" width="800" />
+
 [![Powered by Bun](https://img.shields.io/badge/Powered%20by-Bun-black?logo=bun)](https://bun.sh)
 [![Built with Elysia](https://img.shields.io/badge/Built%20with-Elysia-blue)](https://elysiajs.com)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org/)

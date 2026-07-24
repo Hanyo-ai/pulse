@@ -6,6 +6,8 @@
 
 实时观看 Agent 对话展开 — `system` 提示词、`user` 消息、`assistant` 响应、`tool_result` 工具返回 — 在一个优雅的仪表盘中一览无余。基于 Bun 的自托管 AI 网关，兼容 OpenAI & Anthropic，内置费用追踪与审计日志。
 
+<img src="./assets/pulse.jpg" alt="PULSE - AI Agent 可观测性" width="800" />
+
 [![Powered by Bun](https://img.shields.io/badge/Powered%20by-Bun-black?logo=bun)](https://bun.sh)
 [![Built with Elysia](https://img.shields.io/badge/Built%20with-Elysia-blue)](https://elysiajs.com)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org/)
